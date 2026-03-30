@@ -1,25 +1,37 @@
 # Ptilopsis/plugin_manager.py
 import os
 import sys
+import json
 import importlib.util
 from typing import Dict, Optional, Type
 from .core import Core
 from .plugin import BasePlugin
+from .plugin_archive import PluginArchiveHandler, SecurityError
 
 
 class PluginManager:
-    def __init__(self, core: Core, plugin_dir: str = "plugins"):
+    def __init__(self, core: Core):
         self.core = core
-        self.plugin_dir = plugin_dir
-        self._plugins: Dict[str, BasePlugin] = {}  # 插件实例
-        self._plugin_meta: Dict[str, dict] = {}  # 插件元信息（模块、路径）
-        # 初始化插件目录
-        os.makedirs(self.plugin_dir, exist_ok=True)
+        # 从核心配置读取参数
+        self.config = core.config.get("plugin", {})
+        self.plugin_dir = self.config.get("plugin_dir", "plugins")
+        self.cache_dir = self.config.get("cache_dir", ".cache/plugins")
+        self.user_config_dir = self.config.get("user_config_dir", "config/plugins")
+        # 允许的插件后缀，支持自定义
+        self.allowed_suffixes = self.config.get("allowed_suffixes", [".py", ".pts", ".zip"])
+        # 初始化目录
+        for dir_path in [self.plugin_dir, self.user_config_dir]:
+            os.makedirs(dir_path, exist_ok=True)
         if self.plugin_dir not in sys.path:
             sys.path.insert(0, self.plugin_dir)
+        # 初始化压缩包处理器
+        self.archive_handler = PluginArchiveHandler(self.cache_dir, self.allowed_suffixes)
+        # 插件存储
+        self._plugins: Dict[str, BasePlugin] = {}  # 插件实例
+        self._plugin_meta: Dict[str, dict] = {}  # 插件元信息
 
     def _load_module(self, module_name: str, module_path: str):
-        """动态加载模块，避免reload的坑"""
+        """动态加载模块，解决reload残留问题"""
         spec = importlib.util.spec_from_file_location(module_name, module_path)
         if not spec or not spec.loader:
             raise ImportError(f"无法加载模块 {module_name}")
@@ -28,16 +40,48 @@ class PluginManager:
         spec.loader.exec_module(module)
         return module
 
-    async def load_plugin(self, plugin_path: str) -> bool:
-        """加载单个插件"""
-        full_path = os.path.join(self.plugin_dir, plugin_path)
-        if not os.path.exists(full_path):
-            raise FileNotFoundError(f"插件不存在: {full_path}")
+    def _load_plugin_config(self, plugin_base_path: str) -> tuple[dict, dict]:
+        """加载插件配置，合并默认配置和用户自定义配置"""
+        # 读取插件内置config.json
+        config_path = os.path.join(plugin_base_path, "config.json")
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"插件配置文件不存在: {config_path}")
+        with open(config_path, "r", encoding="utf-8") as f:
+            plugin_config = json.load(f)
 
-        # 生成模块名
-        module_name = os.path.splitext(os.path.basename(plugin_path))[0]
-        # 加载模块
-        module = self._load_module(module_name, full_path)
+        # 校验必填字段
+        required_fields = ["plugin_id", "name", "version"]
+        for field in required_fields:
+            if field not in plugin_config:
+                raise ValueError(f"插件配置缺少必填字段: {field}")
+
+        # 读取用户自定义配置，覆盖默认配置
+        plugin_id = plugin_config["plugin_id"]
+        user_config_path = os.path.join(self.user_config_dir, f"{plugin_id}.json")
+        user_config = {}
+        if os.path.exists(user_config_path):
+            with open(user_config_path, "r", encoding="utf-8") as f:
+                user_config = json.load(f)
+
+        # 合并配置
+        default_config = plugin_config.get("default_config", {})
+        merged_config = {**default_config, **user_config}
+        return plugin_config, merged_config
+
+    async def _load_plugin_from_dir(self, plugin_base_path: str) -> bool:
+        """从目录加载插件（文件夹/解压后的压缩包）"""
+        # 检查必要文件
+        plugin_py_path = os.path.join(plugin_base_path, "plugin.py")
+        if not os.path.exists(plugin_py_path):
+            raise FileNotFoundError(f"插件主文件不存在: {plugin_py_path}")
+
+        # 加载配置
+        plugin_info, merged_config = self._load_plugin_config(plugin_base_path)
+        plugin_id = plugin_info["plugin_id"]
+
+        # 加载插件模块
+        module_name = f"ptilopsis_plugin_{plugin_id}"
+        module = self._load_module(module_name, plugin_py_path)
 
         # 查找插件类
         plugin_class: Optional[Type[BasePlugin]] = None
@@ -47,46 +91,118 @@ class PluginManager:
                 plugin_class = attr
                 break
         if not plugin_class:
-            raise ImportError(f"插件 {module_name} 未找到有效的BasePlugin子类")
+            raise ImportError(f"插件 {plugin_id} 未找到有效的BasePlugin子类")
 
-        # 实例化插件
-        plugin = plugin_class()
-        plugin_id = plugin.plugin_id
-        if not plugin_id:
-            raise ValueError(f"插件 {module_name} 未设置plugin_id")
+        # 校验plugin_id一致性
+        if plugin_class.plugin_id != plugin_id:
+            raise ValueError(f"插件类plugin_id与配置文件不一致: 类中={plugin_class.plugin_id}, 配置中={plugin_id}")
+
+        # 检查插件是否已加载
         if plugin_id in self._plugins:
-            raise ValueError(f"插件ID {plugin_id} 已存在")
+            raise ValueError(f"插件ID {plugin_id} 已存在，无法重复加载")
+
+        # 实例化插件，注入内置属性
+        plugin = plugin_class()
+        plugin.core = self.core
+        plugin.plugin_info = plugin_info
+        plugin.config = merged_config
+        plugin.base_path = os.path.abspath(plugin_base_path)
+        plugin.res_path = os.path.abspath(os.path.join(plugin_base_path, "res"))
 
         # 执行插件加载逻辑
-        await plugin.load(self.core)
-        # 保存插件信息
+        await plugin.load()
+        # 保存插件元信息
         self._plugins[plugin_id] = plugin
         self._plugin_meta[plugin_id] = {
+            "type": "dir",
+            "base_path": plugin_base_path,
             "module": module,
-            "module_name": module_name,
-            "path": plugin_path
+            "module_name": module_name
         }
-        print(f"[插件] {plugin_id} 加载成功")
+        print(f"[插件] {plugin_id} v{plugin_info['version']} 加载成功")
         return True
 
+    async def load_plugin(self, plugin_name: str) -> bool:
+        """
+        统一插件加载入口，自动识别插件类型
+        :param plugin_name: 插件名（单文件名、文件夹名、压缩包名，带后缀）
+        """
+        plugin_path = os.path.join(self.plugin_dir, plugin_name)
+        if not os.path.exists(plugin_path):
+            raise FileNotFoundError(f"插件不存在: {plugin_path}")
+
+        # 1. 处理压缩包插件
+        if os.path.isfile(plugin_path) and self.archive_handler.is_archive_plugin(plugin_path):
+            try:
+                plugin_cache_dir = self.archive_handler.extract_archive(plugin_path)
+                return await self._load_plugin_from_dir(plugin_cache_dir)
+            except SecurityError as e:
+                print(f"[插件] 加载 {plugin_name} 失败: {e}")
+                return False
+
+        # 2. 处理文件夹插件
+        if os.path.isdir(plugin_path):
+            return await self._load_plugin_from_dir(plugin_path)
+
+        # 3. 处理单文件py插件（兼容旧版）
+        if os.path.isfile(plugin_path) and plugin_path.endswith(".py"):
+            module_name = os.path.splitext(plugin_name)[0]
+            module = self._load_module(module_name, plugin_path)
+            # 查找插件类
+            plugin_class: Optional[Type[BasePlugin]] = None
+            for attr_name in dir(module):
+                attr = getattr(module, attr_name)
+                if isinstance(attr, type) and issubclass(attr, BasePlugin) and attr != BasePlugin:
+                    plugin_class = attr
+                    break
+            if not plugin_class:
+                raise ImportError(f"单文件插件 {module_name} 未找到有效的BasePlugin子类")
+            plugin_id = plugin_class.plugin_id
+            if plugin_id in self._plugins:
+                raise ValueError(f"插件ID {plugin_id} 已存在")
+            # 实例化插件
+            plugin = plugin_class()
+            plugin.core = self.core
+            plugin.plugin_info = {"plugin_id": plugin_id, "name": plugin_id, "version": "1.0.0"}
+            plugin.config = {}
+            plugin.base_path = os.path.abspath(self.plugin_dir)
+            plugin.res_path = os.path.abspath(os.path.join(self.plugin_dir, "res", plugin_id))
+            os.makedirs(plugin.res_path, exist_ok=True)
+            # 执行加载
+            await plugin.load()
+            self._plugins[plugin_id] = plugin
+            self._plugin_meta[plugin_id] = {
+                "type": "single_file",
+                "path": plugin_path,
+                "module": module,
+                "module_name": module_name
+            }
+            print(f"[插件] 单文件 {plugin_id} 加载成功")
+            return True
+
+        raise ValueError(f"不支持的插件格式: {plugin_name}")
+
     async def unload_plugin(self, plugin_id: str) -> bool:
-        """卸载单个插件，完全清理所有资源"""
+        """卸载插件，完全清理所有资源"""
         if plugin_id not in self._plugins:
             raise ValueError(f"插件 {plugin_id} 未加载")
 
         plugin = self._plugins[plugin_id]
         meta = self._plugin_meta[plugin_id]
 
-        # 1. 执行插件卸载逻辑，清理用户资源
+        # 1. 执行插件卸载逻辑
         await plugin.unload()
         # 2. 移除插件注册的所有事件监听器
         self.core.event_bus.remove_by_plugin(plugin_id)
-        # 3. 完全清理模块引用，解决Python重载残留问题
+        # 3. 清理模块引用
         module_name = meta["module_name"]
         for key in list(sys.modules.keys()):
             if key == module_name or key.startswith(f"{module_name}."):
                 del sys.modules[key]
-        # 4. 移除插件缓存
+        # 4. 清理缓存（压缩包插件）
+        if meta["type"] == "dir":
+            self.archive_handler.clean_cache(plugin_id)
+        # 5. 移除插件记录
         del self._plugins[plugin_id]
         del self._plugin_meta[plugin_id]
 
@@ -97,28 +213,29 @@ class PluginManager:
         """热重载插件，无需重启Bot"""
         if plugin_id not in self._plugins:
             raise ValueError(f"插件 {plugin_id} 未加载")
-        # 保存插件路径
-        plugin_path = self._plugin_meta[plugin_id]["path"]
+
+        meta = self._plugin_meta[plugin_id]
+        # 获取插件原始路径
+        if meta["type"] == "single_file":
+            plugin_name = os.path.basename(meta["path"])
+        else:
+            plugin_name = os.path.basename(meta["base_path"])
+
         # 先卸载，再重新加载
         await self.unload_plugin(plugin_id)
-        await self.load_plugin(plugin_path)
-        print(f"[插件] {plugin_id} 重载完成")
+        await self.load_plugin(plugin_name)
+        print(f"[插件] {plugin_id} 热重载完成")
         return True
 
     async def load_all(self) -> None:
-        """加载插件目录下的所有插件"""
+        """加载插件目录下的所有合法插件"""
         for filename in os.listdir(self.plugin_dir):
-            # 加载单文件插件
-            if filename.endswith(".py") and not filename.startswith("__"):
-                try:
-                    await self.load_plugin(filename)
-                except Exception as e:
-                    print(f"[插件] 加载 {filename} 失败: {e}")
-            # 加载插件包
-            elif os.path.isdir(os.path.join(self.plugin_dir, filename)):
-                init_path = os.path.join(self.plugin_dir, filename, "__init__.py")
-                if os.path.exists(init_path):
-                    try:
-                        await self.load_plugin(os.path.join(filename, "__init__.py"))
-                    except Exception as e:
-                        print(f"[插件] 加载包 {filename} 失败: {e}")
+            file_path = os.path.join(self.plugin_dir, filename)
+            try:
+                # 跳过隐藏文件
+                if filename.startswith("."):
+                    continue
+                # 自动识别并加载
+                await self.load_plugin(filename)
+            except Exception as e:
+                print(f"[插件] 加载 {filename} 失败: {e}")
