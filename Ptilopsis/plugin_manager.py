@@ -107,7 +107,9 @@ class PluginManager:
         plugin.plugin_info = plugin_info
         plugin.config = merged_config
         plugin.base_path = os.path.abspath(plugin_base_path)
-        plugin.res_path = os.path.abspath(os.path.join(plugin_base_path, "res"))
+        # 【修改】res改为resource
+        plugin.res_path = os.path.abspath(os.path.join(plugin_base_path, "resource"))
+        plugin.plugin_priority = plugin_info.get("priority", 0)
 
         # 执行插件加载逻辑
         await plugin.load()
@@ -166,8 +168,9 @@ class PluginManager:
             plugin.plugin_info = {"plugin_id": plugin_id, "name": plugin_id, "version": "1.0.0"}
             plugin.config = {}
             plugin.base_path = os.path.abspath(self.plugin_dir)
-            plugin.res_path = os.path.abspath(os.path.join(self.plugin_dir, "res", plugin_id))
-            os.makedirs(plugin.res_path, exist_ok=True)
+            # 【修改】res改为resource，且不主动创建文件夹
+            plugin.res_path = os.path.abspath(os.path.join(self.plugin_dir, "resource", plugin_id))
+            # 【删除】os.makedirs(plugin.res_path, exist_ok=True) 这一行
             # 执行加载
             await plugin.load()
             self._plugins[plugin_id] = plugin
@@ -228,12 +231,12 @@ class PluginManager:
         return True
 
     async def load_all(self) -> None:
-        """加载插件目录下的所有合法插件"""
+        """加载插件目录下的所有合法插件，过滤缓存和隐藏文件"""
         for filename in os.listdir(self.plugin_dir):
             file_path = os.path.join(self.plugin_dir, filename)
             try:
-                # 跳过隐藏文件
-                if filename.startswith("."):
+                # 新增：过滤隐藏文件、__pycache__目录
+                if filename.startswith(".") or filename == "__pycache__":
                     continue
                 # 自动识别并加载
                 await self.load_plugin(filename)

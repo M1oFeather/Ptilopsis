@@ -1,21 +1,25 @@
-# plugins/reply_plugin.py
-from Ptilopsis import BasePlugin, Core, MessageEvent
+from Ptilopsis import *
 
-class ReplyPlugin(BasePlugin):
-    plugin_id = "reply_plugin"
 
-    async def load(self, core: Core):
-        self.core = core
-        # 注册事件监听器，Mod式挂载
-        @core.event_bus.listen(MessageEvent, plugin_id=self.plugin_id)
-        async def on_message(event: MessageEvent):
+class TestPlugin(BasePlugin):
+    async def load(self):
+        # 测试pre阶段
+        @self.on(MessageEvent, phase="pre")
+        async def pre_check(event: MessageEvent):
+            if event.content == "阻断":
+                event.stop_propagation()
+                await event.reply("事件已被阻断")
+
+        # 测试normal阶段，自动继承优先级
+        @self.on(MessageEvent)
+        async def reply(event: MessageEvent):
             if event.content == "你好":
-                await event.reply(f"你好呀！来自{event.adapter.platform}的用户")
-            elif event.content == "重载":
-                # 测试热重载，无需重启Bot
-                await self.core.plugin_manager.reload_plugin(self.plugin_id)
-                await event.reply("✅ 插件热重载完成")
+                await event.reply(self.config.get("reply_text", "你好呀"))
+
+        # 测试post阶段
+        @self.on(MessageEvent, phase="post", ignore_cancelled=True)
+        async def log(event: MessageEvent):
+            print(f"[日志] 收到消息：{event.content}")
 
     async def unload(self):
-        # 清理资源（如异步任务、数据库连接等）
-        print(f"reply_plugin 已卸载，资源已清理")
+        pass

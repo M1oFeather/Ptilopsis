@@ -12,14 +12,12 @@ class Core:
     def __init__(self, config: Dict[str, Any] = None):
         self.config = config or {}
         self._running = False
-        # 初始化核心模块
         from .event_bus import EventBus
         from .plugin_manager import PluginManager
         from .adapter_manager import AdapterManager
         self.event_bus: EventBus = EventBus()
-        self.plugin_manager: PluginManager = PluginManager(
-            self, plugin_dir=self.config.get("plugin_dir", "plugins")
-        )
+        # 【修改】PluginManager初始化只需要传递core，不需要plugin_dir
+        self.plugin_manager: PluginManager = PluginManager(self)
         self.adapter_manager: AdapterManager = AdapterManager(self)
 
     async def start(self) -> None:

@@ -1,25 +1,53 @@
-# Ptilopsis/plugin.py
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Type, Coroutine, Callable
 from .core import Core
+from .event import BaseEvent
+from .event_bus import EventPhase  # 【新增】导入EventPhase
 
 class BasePlugin(ABC):
     """插件抽象基类，所有功能插件必须继承"""
-    plugin_id: str  # 【必填】插件唯一ID，必须和config.json中的plugin_id一致
+    plugin_id: str = ""
 
     # 插件加载后自动注入的内置属性
-    core: Core                      # 框架核心实例
-    plugin_info: Dict[str, Any]     # 插件元信息（来自config.json）
-    config: Dict[str, Any]          # 合并后的插件配置（默认配置+用户自定义配置）
-    base_path: str                  # 插件根目录绝对路径（文件夹/解压后的缓存目录）
-    res_path: str                   # 插件资源文件夹res的绝对路径
+    core: Core
+    plugin_info: Dict[str, Any]
+    config: Dict[str, Any]
+    base_path: str
+    # 【修改】注释中的res改为resource
+    res_path: str  # 插件资源文件夹resource的绝对路径
+    plugin_priority: int = 0
 
     @abstractmethod
     async def load(self) -> None:
-        """插件加载时执行，用于注册事件监听器、初始化资源"""
         pass
 
     @abstractmethod
     async def unload(self) -> None:
-        """插件卸载时执行，用于清理资源、取消异步任务"""
         pass
+
+    # 【新增】极简挂载装饰器
+    def listen(
+        self,
+        event_type: Type[BaseEvent],
+        priority: Optional[int] = None,
+        ignore_cancelled: bool = False,
+        phase: EventPhase = "normal"
+    ):
+        use_priority = priority if priority is not None else self.plugin_priority
+        return self.core.event_bus.listen(
+            event_type=event_type,
+            priority=use_priority,
+            plugin_id=self.plugin_id,
+            ignore_cancelled=ignore_cancelled,
+            phase=phase
+        )
+
+    # 【新增】别名装饰器，更简短
+    def on(
+        self,
+        event_type: Type[BaseEvent],
+        priority: Optional[int] = None,
+        ignore_cancelled: bool = False,
+        phase: EventPhase = "normal"
+    ):
+        return self.listen(event_type, priority, ignore_cancelled, phase)
