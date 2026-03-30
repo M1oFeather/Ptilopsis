@@ -1,72 +1,17 @@
-# -*- encoding:utf-8 -*-
-from os import getcwd, scandir
-import sys
-import importlib
-from os.path import abspath, join, exists, dirname
-from Ptilopsis import Event, API
-from Ptilopsis.util import log_output
-# 常用库导入
-import sqlite3
-import onedice
+# Ptilopsis/plugin.py
+from abc import ABC, abstractmethod
+from .core import Core
 
+class BasePlugin(ABC):
+    """插件抽象基类，所有功能插件必须继承"""
+    plugin_id: str  # 插件唯一ID，必须设置
 
-class PluginManager:
-    main_dir = getcwd()
-    plugin_dir = join(main_dir, 'plugin')
-    plugin_list = []
-
-    def __init__(self):
-        if self.plugin_dir not in sys.path:
-            sys.path.append(self.plugin_dir)
-        log_output("插件管理器加载成功")
-        self.test = None
-
-    def plugin_registered(self):
-        for item in scandir(self.plugin_dir):
-            if item.is_dir():
-                if (exists(join(self.plugin_dir, item.name, "config.toml"))
-                        and exists(join(self.plugin_dir, item.name, "main.py"))):
-                    plugin_object = importlib.import_module(item.name)
-                    plugin_object = plugin_object.main.PluginEvent()
-                    plugin_object.init()
-                    self.plugin_list.append(plugin_object)
-                else:
-                    log_output(item.name + "缺失文件", "WARNING")
-
-    def plugin_event(self, event, bot):
-        bot.event(event)
-        for plugin_object in self.plugin_list:
-            plugin_object.main(event, bot)
-        return {}
-
-    def plugin_hot_reload(self):
+    @abstractmethod
+    async def load(self, core: Core) -> None:
+        """插件加载时执行，用于注册事件监听器、初始化资源"""
         pass
 
-    def plugin_test(self):
+    @abstractmethod
+    async def unload(self) -> None:
+        """插件卸载时执行，用于清理资源、取消异步任务"""
         pass
-
-
-# 插件基类
-class Plugin(Event):
-    def __init__(self):
-        self.bot = None
-
-    def init(self):
-        pass
-
-    def main(self, event, bot):
-        self.bot = bot
-        if event['type'] == "private_message":
-            self.private_message(event['data'], self.bot)
-        elif event['type'] == "group_message":
-            self.group_message(event['data'], self.bot)
-        elif event['type'] == "group_poke":
-            self.group_poke(event['data'], self.bot)
-        return self.bot.result()
-
-
-if __name__ == "__main__":
-    Manager = PluginManager()
-    Manager.plugin_registered()
-    print(Manager.test.data)
-    print(Manager.plugin_dir)

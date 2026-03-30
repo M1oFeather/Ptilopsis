@@ -1,18 +1,10 @@
 # -*- encoding:utf-8 -*-
 
-from Ptilopsis.api import API
-from Ptilopsis.bot import Bot
-from Ptilopsis.classify import Classify
-from Ptilopsis.event import Event
-from Ptilopsis.plugin import PluginManager, Plugin
-from Ptilopsis.util import *
+from .core import Core
+from .event import BaseEvent, MessageEvent
+from .adapter import BaseAdapter
+from .plugin import BasePlugin
 
 __all__ = [
-    "API",
-    "Bot",
-    "Classify",
-    "Event",
-    "PluginManager",
-    "Plugin",
-    "util"
+
 ]
