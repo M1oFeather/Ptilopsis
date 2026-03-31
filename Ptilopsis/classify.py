@@ -1,6 +1,6 @@
 # -*- encoding:utf-8 -*-
 
-from Ptilopsis.event import Event, MessageData, NoticeData
+from Ptilopsis.event.base import Event, MessageData, NoticeData
 from Ptilopsis.util import log_output
 
 class Classify:

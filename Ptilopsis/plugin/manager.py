@@ -1,34 +1,33 @@
-# Ptilopsis/plugin_manager.py
+# -*- coding: utf-8 -*-
 import os
 import sys
 import json
 import importlib.util
 from typing import Dict, Optional, Type
-from .core import Core
-from .plugin import BasePlugin
-from .plugin_archive import PluginArchiveHandler, SecurityError
+from ..core import Core
+from .base import BasePlugin
+from .archive import PluginArchiveHandler, SecurityError
 
 
 class PluginManager:
     def __init__(self, core: Core):
         self.core = core
-        # 从核心配置读取参数
         self.config = core.config.get("plugin", {})
         self.plugin_dir = self.config.get("plugin_dir", "plugins")
         self.cache_dir = self.config.get("cache_dir", ".cache/plugins")
         self.user_config_dir = self.config.get("user_config_dir", "config/plugins")
-        # 允许的插件后缀，支持自定义
         self.allowed_suffixes = self.config.get("allowed_suffixes", [".py", ".pts", ".zip"])
-        # 初始化目录
+
         for dir_path in [self.plugin_dir, self.user_config_dir]:
             os.makedirs(dir_path, exist_ok=True)
         if self.plugin_dir not in sys.path:
             sys.path.insert(0, self.plugin_dir)
-        # 初始化压缩包处理器
+
         self.archive_handler = PluginArchiveHandler(self.cache_dir, self.allowed_suffixes)
-        # 插件存储
-        self._plugins: Dict[str, BasePlugin] = {}  # 插件实例
-        self._plugin_meta: Dict[str, dict] = {}  # 插件元信息
+        self._plugins: Dict[str, BasePlugin] = {}
+        self._plugin_meta: Dict[str, dict] = {}
+
+    # ... 其余代码保持不变，只需确保所有内部导入都正确 ...
 
     def _load_module(self, module_name: str, module_path: str):
         """动态加载模块，解决reload残留问题"""
@@ -69,11 +68,15 @@ class PluginManager:
         return plugin_config, merged_config
 
     async def _load_plugin_from_dir(self, plugin_base_path: str) -> bool:
-        """从目录加载插件（文件夹/解压后的压缩包）"""
-        # 检查必要文件
-        plugin_py_path = os.path.join(plugin_base_path, "plugin.py")
+        # 【修改】优先找 main.py，兼容 plugin.py
+        plugin_py_path = os.path.join(plugin_base_path, "main.py")
         if not os.path.exists(plugin_py_path):
-            raise FileNotFoundError(f"插件主文件不存在: {plugin_py_path}")
+            # 兼容旧版 plugin.py
+            plugin_py_path = os.path.join(plugin_base_path, "plugin.py")
+            if not os.path.exists(plugin_py_path):
+                raise FileNotFoundError(f"插件主文件不存在: {plugin_base_path}/main.py (或 plugin.py)")
+
+        # ... 其余代码保持不变 ...
 
         # 加载配置
         plugin_info, merged_config = self._load_plugin_config(plugin_base_path)

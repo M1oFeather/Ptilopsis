@@ -5,7 +5,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s[%(levelname)s]%(mess
                     , datefmt='%Y-%m-%d %I:%M:%S')
 logger = logging.getLogger(__name__)
 
-import toml
 
 
 def log_output(message, level="INFO"):

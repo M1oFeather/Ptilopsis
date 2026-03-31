@@ -1,4 +1,4 @@
-# plugins/hello_plugin/plugin.py
+# plugins/hello_plugin/base.py
 from Ptilopsis import BasePlugin, MessageEvent
 
 

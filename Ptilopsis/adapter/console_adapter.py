@@ -1,7 +1,7 @@
-# Ptilopsis/adapters/console_adapter.py
+# Ptilopsis/adapter/console_adapter.py
 import asyncio
-from ..adapter import BaseAdapter
-from ..event import MessageEvent
+from .base import BaseAdapter
+from Ptilopsis.event.base import MessageEvent
 
 class ConsoleAdapter(BaseAdapter):
     adapter_id = "console"

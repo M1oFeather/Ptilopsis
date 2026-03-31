@@ -1,7 +1,7 @@
 # main.py 启动示例
 import asyncio
 from Ptilopsis.core import Core
-from Ptilopsis.adapters.console_adapter import ConsoleAdapter
+from Ptilopsis.adapter.console_adapter import ConsoleAdapter
 
 async def main():
     # 初始化核心，配置插件系统

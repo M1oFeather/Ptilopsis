@@ -1,20 +1,17 @@
+# -*- encoding:utf-8 -*-
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Type, Coroutine, Callable
-from .core import Core
-from .event import BaseEvent
-from .event_bus import EventPhase  # 【新增】导入EventPhase
+from ..core import Core
+from ..event.base import BaseEvent
+from ..event.bus import EventPhase
 
 class BasePlugin(ABC):
-    """插件抽象基类，所有功能插件必须继承"""
     plugin_id: str = ""
-
-    # 插件加载后自动注入的内置属性
     core: Core
     plugin_info: Dict[str, Any]
     config: Dict[str, Any]
     base_path: str
-    # 【修改】注释中的res改为resource
-    res_path: str  # 插件资源文件夹resource的绝对路径
+    res_path: str
     plugin_priority: int = 0
 
     @abstractmethod
@@ -25,7 +22,6 @@ class BasePlugin(ABC):
     async def unload(self) -> None:
         pass
 
-    # 【新增】极简挂载装饰器
     def listen(
         self,
         event_type: Type[BaseEvent],
@@ -42,7 +38,6 @@ class BasePlugin(ABC):
             phase=phase
         )
 
-    # 【新增】别名装饰器，更简短
     def on(
         self,
         event_type: Type[BaseEvent],

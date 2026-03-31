@@ -1,4 +1,4 @@
-# Ptilopsis/plugin_archive.py
+# Ptilopsis/archive.py
 import os
 import json
 import zipfile

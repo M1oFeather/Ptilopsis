@@ -1,7 +1,7 @@
-# Ptilopsis/adapter.py
+# Ptilopsis/base.py
 from abc import ABC, abstractmethod
 from typing import Dict, Any
-from .core import Core
+from Ptilopsis.core import Core
 
 class BaseAdapter(ABC):
     """适配器抽象基类，所有平台适配器必须继承此类"""
