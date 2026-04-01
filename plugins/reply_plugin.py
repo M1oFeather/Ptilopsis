@@ -2,6 +2,7 @@ from Ptilopsis import *
 
 
 class TestPlugin(BasePlugin):
+    plugin_id = "test"
     async def load(self):
         # 测试pre阶段
         @self.on(MessageEvent, phase="pre")
