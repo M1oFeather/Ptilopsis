@@ -135,6 +135,18 @@ class MessageEvent(BaseEvent):
         self.raw_message = raw_message
         self.sender = sender
 
+    # ==================== 新增：保持向后兼容的快捷属性 ====================
+    @property
+    def is_group(self) -> bool:
+        """是否为群聊消息（兼容旧版插件）"""
+        return self.scene == MessageScene.GROUP
+
+    @property
+    def is_private(self) -> bool:
+        """是否为私聊消息（兼容旧版插件）"""
+        return self.scene == MessageScene.PRIVATE
+    # ======================================================================
+
     async def reply(
             self,
             content: Union[str, List[MessageSegment]],

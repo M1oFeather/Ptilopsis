@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Ptilopsis 控制面板</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+    <script src="https://unpkg.com/element-plus"></script>
+    <script src="https://unpkg.com/@element-plus/icons-vue"></script>
+    <style>
+        body { margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f2f3f5; }
+        #app { height: 100vh; display: flex; flex-direction: column; }
+        .el-header { background-color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.05); display: flex; align-items: center; justify-content: space-between; padding: 0 20px; z-index: 10; }
+        .logo { font-size: 20px; font-weight: bold; color: #409EFF; display: flex; align-items: center; gap: 10px; }
+        .log-terminal { background: #1e1e1e; color: #4af626; padding: 15px; border-radius: 6px; height: 300px; overflow-y: auto; font-family: Consolas, monospace; font-size: 13px; line-height: 1.5; margin-top: 15px; }
+        .login-card { width: 400px; margin: 100px auto; padding: 20px; text-align: center; }
+        .el-main { max-width: 1200px; margin: 0 auto; width: 100%; padding: 20px; }
+    </style>
+</head>
+<body>
+<div id="app">
+    <div v-if="!isLoggedIn" style="height: 100vh; background: #eef2f6; overflow: hidden;">
+        <el-card class="login-card" shadow="hover">
+            <h2 style="color: #409EFF;">Ptilopsis Bot</h2>
+            <p style="color: #909399; margin-bottom: 30px;">白面鸮系统访问认证</p>
+            <el-input v-model="loginForm.username" placeholder="账号 (admin)" style="margin-bottom: 15px;"></el-input>
+            <el-input v-model="loginForm.password" placeholder="密码 (admin)" type="password" show-password style="margin-bottom: 20px;"></el-input>
+            <el-button type="primary" @click="handleLogin" style="width: 100%;" :loading="loading">系统登录</el-button>
+        </el-card>
+    </div>
+
+    <template v-else>
+        <el-header height="60px">
+            <div class="logo">
+                <el-icon><Monitor /></el-icon> Ptilopsis Dashboard
+            </div>
+            <div>
+                <el-tag type="success" style="margin-right: 15px;" v-if="systemStatus.running">系统运行中</el-tag>
+                <el-button size="small" type="danger" plain @click="logout">退出登录</el-button>
+            </div>
+        </el-header>
+
+        <el-main>
+            <el-tabs v-model="activeTab" class="demo-tabs">
+                <el-tab-pane label="系统概览" name="dashboard">
+                    <el-row :gutter="20" style="margin-bottom: 20px;">
+                        <el-col :span="8">
+                            <el-card shadow="hover">
+                                <template #header><b>已加载插件</b></template>
+                                <h2 style="margin:0; color:#409EFF;">{{ systemStatus.plugin_count }}</h2>
+                            </el-card>
+                        </el-col>
+                        <el-col :span="8">
+                            <el-card shadow="hover">
+                                <template #header><b>运行中适配器</b></template>
+                                <h2 style="margin:0; color:#67C23A;">{{ systemStatus.adapter_count }}</h2>
+                            </el-card>
+                        </el-col>
+                        <el-col :span="8">
+                            <el-card shadow="hover">
+                                <template #header><b>系统核心状态</b></template>
+                                <h2 style="margin:0; color:#E6A23C;">{{ systemStatus.running ? 'Active' : 'Stopped' }}</h2>
+                            </el-card>
+                        </el-col>
+                    </el-row>
+                    <el-card shadow="never">
+                        <template #header><b>实时控制台日志</b></template>
+                        <el-button size="small" @click="logs = []" style="margin-bottom: 10px;">清空日志</el-button>
+                        <div class="log-terminal" id="logBox">
+                            <div v-for="(log, idx) in logs" :key="idx">{{ log }}</div>
+                        </div>
+                    </el-card>
+                </el-tab-pane>
+
+                <el-tab-pane label="插件管理" name="plugins">
+                    <el-table :data="plugins" border style="width: 100%" v-loading="loading">
+                        <el-table-column prop="name" label="插件名称" width="180"></el-table-column>
+                        <el-table-column prop="plugin_id" label="标识 (ID)" width="150"></el-table-column>
+                        <el-table-column prop="version" label="版本" width="100"></el-table-column>
+                        <el-table-column label="开发类型" width="120">
+                            <template #default="scope">
+                                <el-tag :type="scope.row.is_blockly ? 'warning' : 'info'" size="small">
+                                    {{ scope.row.is_blockly ? '积木/Blockly' : 'Python 原生' }}
+                                </el-tag>
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="操作">
+                            <template #default="scope">
+                                <el-button size="small" type="primary" plain @click="reloadPlugin(scope.row.plugin_id)">重载</el-button>
+                                <el-button size="small" type="danger" plain @click="unloadPlugin(scope.row.plugin_id)">卸载</el-button>
+                                <el-button size="small" type="warning" plain v-if="scope.row.is_blockly">可视化编辑</el-button>
+                            </template>
+                        </el-table-column>
+                    </el-table>
+                </el-tab-pane>
+
+                <el-tab-pane label="适配器管理" name="adapters">
+                    <el-table :data="adapters" border style="width: 100%" v-loading="loading">
+                        <el-table-column prop="platform" label="平台" width="180"></el-table-column>
+                        <el-table-column prop="adapter_id" label="适配器 ID" width="200"></el-table-column>
+                        <el-table-column label="状态" width="120">
+                            <template #default="scope">
+                                <el-tag :type="scope.row.running ? 'success' : 'info'">
+                                    {{ scope.row.running ? '运行中' : '已停止' }}
+                                </el-tag>
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="操作">
+                            <template #default="scope">
+                                <el-button size="small" :type="scope.row.running ? 'danger' : 'success'" @click="toggleAdapter(scope.row)">
+                                    {{ scope.row.running ? '停止' : '启动' }}
+                                </el-button>
+                            </template>
+                        </el-table-column>
+                    </el-table>
+                </el-tab-pane>
+            </el-tabs>
+        </el-main>
+    </template>
+</div>
+
+<script>
+    const { createApp, ref, reactive, onMounted, nextTick } = Vue;
+
+    const app = createApp({
+        setup() {
+            const baseUrl = 'http://127.0.0.1:8088/api';
+            const isLoggedIn = ref(false);
+            const token = ref(localStorage.getItem('pt_token') || '');
+            const activeTab = ref('dashboard');
+            const loading = ref(false);
+
+            const loginForm = reactive({ username: '', password: '' });
+            const systemStatus = reactive({ running: false, plugin_count: 0, adapter_count: 0 });
+            const plugins = ref([]);
+            const adapters = ref([]);
+            const logs = ref([]);
+            let ws = null;
+
+            // 封装自带 Token 的 Fetch
+            const apiFetch = async (url, options = {}) => {
+                options.headers = { ...options.headers, 'Content-Type': 'application/json' };
+                const res = await fetch(`${baseUrl}${url}?token=${token.value}`, options);
+                if (res.status === 401) { logout(); throw new Error('Auth Failed'); }
+                return res.json();
+            };
+
+            const handleLogin = async () => {
+                loading.value = true;
+                try {
+                    const res = await fetch(`${baseUrl}/auth/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(loginForm)
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        token.value = data.access_token;
+                        localStorage.setItem('pt_token', token.value);
+                        isLoggedIn.value = true;
+                        initData();
+                    } else {
+                        ElementPlus.ElMessage.error("登录失败，账号或密码错误");
+                    }
+                } finally {
+                    loading.value = false;
+                }
+            };
+
+            const logout = () => {
+                token.value = '';
+                localStorage.removeItem('pt_token');
+                isLoggedIn.value = false;
+                if(ws) ws.close();
+            };
+
+            const initData = async () => {
+                try {
+                    // 验证Token
+                    await apiFetch('/auth/verify');
+                    isLoggedIn.value = true;
+                    fetchStatus();
+                    fetchPlugins();
+                    fetchAdapters();
+                    initWebSocket();
+                } catch (e) {
+                    logout();
+                }
+            };
+
+            const fetchStatus = async () => {
+                const data = await apiFetch('/system/status');
+                Object.assign(systemStatus, data);
+            };
+
+            const fetchPlugins = async () => {
+                loading.value = true;
+                plugins.value = await apiFetch('/plugins');
+                loading.value = false;
+            };
+
+            const reloadPlugin = async (id) => {
+                await apiFetch(`/plugins/${id}/reload`, { method: 'POST' });
+                ElementPlus.ElMessage.success(`插件 ${id} 重载成功`);
+                fetchPlugins();
+            };
+
+            const unloadPlugin = async (id) => {
+                await apiFetch(`/plugins/${id}/unload`, { method: 'POST' });
+                ElementPlus.ElMessage.success(`插件 ${id} 卸载成功`);
+                fetchPlugins();
+            };
+
+            const fetchAdapters = async () => {
+                loading.value = true;
+                adapters.value = await apiFetch('/adapters');
+                loading.value = false;
+            };
+
+            const toggleAdapter = async (row) => {
+                const action = row.running ? 'stop' : 'start';
+                await apiFetch(`/adapters/${row.adapter_id}/toggle?action=${action}`, { method: 'POST' });
+                ElementPlus.ElMessage.success(`适配器操作成功`);
+                fetchAdapters();
+            };
+
+            const initWebSocket = () => {
+                if (ws) ws.close();
+                ws = new WebSocket('ws://127.0.0.1:8088/api/logs/ws');
+                ws.onmessage = (event) => {
+                    logs.value.push(event.data);
+                    if (logs.value.length > 200) logs.value.shift(); // 保留最新200条
+                    nextTick(() => {
+                        const box = document.getElementById('logBox');
+                        if(box) box.scrollTop = box.scrollHeight;
+                    });
+                };
+            };
+
+            onMounted(() => {
+                if (token.value) initData();
+            });
+
+            return {
+                isLoggedIn, loginForm, handleLogin, logout, loading,
+                activeTab, systemStatus, plugins, adapters, logs,
+                reloadPlugin, unloadPlugin, toggleAdapter
+            }
+        }
+    });
+
+    // 注册所有图标
+    for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
+        app.component(key, component);
+    }
+    app.use(ElementPlus);
+    app.mount('#app');
+</script>
+</body>
+</html>
