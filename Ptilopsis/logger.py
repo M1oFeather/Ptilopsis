@@ -489,8 +489,7 @@ class LogManager:
         if category:
             logs = [log for log in logs if category.lower() in log.category.lower()]
         
-        # 倒序排列（最新的在前）
-        logs = logs[::-1]
+        # 保持正序（最新的在后面）
         
         # 分页
         total = len(logs)
