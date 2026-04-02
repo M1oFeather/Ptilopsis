@@ -9,6 +9,7 @@ from ..event.base import (
     GroupRecallEvent, FriendRecallEvent, GroupAdminEvent,
     GroupUploadEvent, FriendAddEvent, PokeEvent
 )
+from ..logger import info, error, warning
 
 class ConsoleAdapter(BaseAdapter):
     """
@@ -33,15 +34,15 @@ class ConsoleAdapter(BaseAdapter):
 
     async def start(self) -> None:
         self._running = True
-        print(f"[控制台适配器] 启动成功，默认场景：{self.default_scene}")
+        info(f"启动成功，默认场景：{self.default_scene}", "适配器", "ConsoleAdapter")
         
         # 检查是否在交互式环境中运行
         if sys.stdin.isatty():
             print("[输入消息]: ", end="", flush=True)
             self._input_task = asyncio.create_task(self._input_loop())
         else:
-            print("[控制台适配器] 非交互式环境，跳过输入循环")
-            print("[提示] 可以通过API调用与控制台适配器交互")
+            info("非交互式环境，跳过输入循环", "适配器", "ConsoleAdapter")
+            info("可以通过API调用与控制台适配器交互", "其他")
         
         asyncio.create_task(self._heartbeat_loop())
 
@@ -49,7 +50,7 @@ class ConsoleAdapter(BaseAdapter):
         self._running = False
         if self._input_task and not self._input_task.done():
             self._input_task.cancel()
-        print(f"\n[控制台适配器] 已停止")
+        info("已停止", "适配器", "ConsoleAdapter")
 
     async def _input_loop(self) -> None:
         loop = asyncio.get_running_loop()
@@ -58,7 +59,7 @@ class ConsoleAdapter(BaseAdapter):
             test_content = await loop.run_in_executor(None, sys.stdin.readline)
         except Exception:
             # stdin 不可用，退出输入循环
-            print("\n[控制台适配器] 标准输入不可用，退出输入循环")
+            error("标准输入不可用，退出输入循环", "适配器", "ConsoleAdapter")
             return
         
         while self._running:
@@ -97,7 +98,7 @@ class ConsoleAdapter(BaseAdapter):
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                print(f"\n[控制台适配器] 输入处理错误: {e}")
+                error(f"输入处理错误: {e}", "适配器", "ConsoleAdapter")
                 print("[控制台适配器] 标准输入异常，退出输入循环")
                 break
 

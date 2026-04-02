@@ -2,6 +2,7 @@
 from typing import Dict, Optional
 # 【修改】更新为相对路径
 from .base import BaseAdapter
+from ..logger import info, error
 
 class AdapterManager:
     def __init__(self, core):
@@ -13,21 +14,58 @@ class AdapterManager:
             raise ValueError(f"适配器 {adapter.adapter_id} 已存在")
         self._adapters[adapter.adapter_id] = adapter
 
+    def create_adapter(self, adapter_type: str, adapter_id: str, config: dict = None) -> BaseAdapter:
+        """创建新的适配器实例
+        
+        Args:
+            adapter_type: 适配器类型 (onebot11, onebot12, console)
+            adapter_id: 适配器ID
+            config: 适配器配置
+            
+        Returns:
+            创建的适配器实例
+        """
+        config = config or {}
+        
+        if adapter_type == "onebot11":
+            from .onebot11_adapter import OneBot11Adapter
+            adapter = OneBot11Adapter(self.core, adapter_id=adapter_id, **config)
+        elif adapter_type == "onebot12":
+            from .onebot12_adapter import OneBot12Adapter
+            adapter = OneBot12Adapter(self.core, adapter_id=adapter_id, **config)
+        elif adapter_type == "console":
+            from .console_adapter import ConsoleAdapter
+            adapter = ConsoleAdapter(self.core, adapter_id=adapter_id, **config)
+        else:
+            raise ValueError(f"不支持的适配器类型: {adapter_type}")
+        
+        self.add_adapter(adapter)
+        info(f"适配器 {adapter_id} ({adapter_type}) 创建成功", "适配器", adapter_id)
+        return adapter
+
+    def remove_adapter(self, adapter_id: str) -> bool:
+        """移除适配器"""
+        if adapter_id in self._adapters:
+            del self._adapters[adapter_id]
+            info(f"适配器 {adapter_id} 已移除", "适配器", adapter_id)
+            return True
+        return False
+
     async def start_all(self) -> None:
         for adapter in self._adapters.values():
             try:
                 await adapter.start()
-                print(f"[适配器] {adapter.adapter_id} 启动成功")
+                info(f"{adapter.adapter_id} 启动成功", "适配器", adapter.adapter_id)
             except Exception as e:
-                print(f"[适配器] {adapter.adapter_id} 启动失败: {e}")
+                error(f"{adapter.adapter_id} 启动失败: {e}", "适配器", adapter.adapter_id)
 
     async def stop_all(self) -> None:
         for adapter in self._adapters.values():
             try:
                 await adapter.stop()
-                print(f"[适配器] {adapter.adapter_id} 已停止")
+                info(f"{adapter.adapter_id} 已停止", "适配器", adapter.adapter_id)
             except Exception as e:
-                print(f"[适配器] {adapter.adapter_id} 停止失败: {e}")
+                error(f"{adapter.adapter_id} 停止失败: {e}", "适配器", adapter.adapter_id)
 
     def get_adapter(self, adapter_id: str) -> Optional[BaseAdapter]:
         return self._adapters.get(adapter_id)

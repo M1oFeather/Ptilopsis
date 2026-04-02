@@ -8,7 +8,15 @@ requests = "*"
 onedice = "*"
 gevent = "*"
 flask = "*"
+flask-cors = "*"
 toml = "*"
+fastapi = "*"
+uvicorn = "*"
+pyjwt = "*"
+psutil = "*"
+websockets = "*"
+python-multipart = "*"
+pyqt5 = "*"
 
 [dev-packages]
 

@@ -1,253 +1,320 @@
-# Ptilopsis/web_panel.py
-import asyncio
+# -*- coding: utf-8 -*-
+"""
+Ptilopsis Web Panel - Flask Version
+使用 Flask + Jinja2 实现管理后台
+"""
 import os
 import json
+import time
+import psutil
 import logging
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime
+from functools import wraps
+from pathlib import Path
 
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
-import uvicorn
-import jwt
+from flask import Flask, render_template, jsonify, request, session, redirect, url_for
+from flask_cors import CORS
+import threading
 
-SECRET_KEY = "ptilopsis_secure_key_for_jwt_256bits_v1"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
+from .logger import log_manager
 
-
-class ConnectionManager:
-    """WebSocket 连接管理器，用于实时推送日志"""
-
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-
-    async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            try:
-                await connection.send_text(message)
-            except Exception:
-                pass
+# 屏蔽 werkzeug 的日志输出
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 
-ws_manager = ConnectionManager()
-
-
-class WebSocketLogHandler(logging.Handler):
-    """自定义日志处理器，将日志实时通过 WebSocket 推送给前端"""
-
-    def __init__(self, loop: asyncio.AbstractEventLoop):
-        super().__init__()
-        self.loop = loop
-
-    def emit(self, record):
-        msg = self.format(record)
-        if self.loop.is_running():
-            asyncio.run_coroutine_threadsafe(ws_manager.broadcast(msg), self.loop)
-
-
-# ==================== 数据模型 ====================
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-
-
-class PluginConfigRequest(BaseModel):
-    config: Dict[str, Any]
-
-
-# ==================== 核心面板管理器 ====================
 class WebPanelManager:
-    def __init__(self, core, host: str = "127.0.0.1", port: int = 8088):
+    """Flask Web 面板管理器"""
+
+    def __init__(self, core, host: str = "127.0.0.1", port: int = 8088, debug: bool = False):
         self.core = core
         self.host = host
         self.port = port
-
-        self.app = FastAPI(title="Ptilopsis Web Panel", version="1.0.0")
-
-        self.app.add_middleware(
-            CORSMiddleware,
-            allow_origins=["*"],
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
+        self.debug = debug
+        self.app = Flask(
+            __name__,
+            template_folder=os.path.join(os.path.dirname(__file__), '..', 'web', 'templates'),
+            static_folder=os.path.join(os.path.dirname(__file__), '..', 'web', 'static')
         )
-
-        self.server: Optional[uvicorn.Server] = None
+        self.app.secret_key = 'ptilopsis_secret_key_for_session'
+        CORS(self.app)
+        
         self._setup_routes()
+        self._running = False
+        self._thread = None
+
+    def _login_required(self, f):
+        """登录验证装饰器"""
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if 'logged_in' not in session:
+                return redirect(url_for('login'))
+            return f(*args, **kwargs)
+        return decorated_function
 
     def _setup_routes(self):
-        router = APIRouter(prefix="/api")
+        """设置路由"""
+        
+        @self.app.route('/')
+        def index():
+            """主页"""
+            if 'logged_in' not in session:
+                return redirect(url_for('login'))
+            return render_template('index.html', 
+                                   system_status=self._get_system_status(),
+                                   plugins=self._get_plugins(),
+                                   adapters=self._get_adapters())
 
-        def verify_token(token: str):
+        @self.app.route('/login')
+        def login():
+            """登录页面"""
+            return render_template('login.html')
+
+        @self.app.route('/api/login', methods=['POST'])
+        def api_login():
+            """登录 API"""
+            data = request.get_json()
+            username = data.get('username', '')
+            password = data.get('password', '')
+            
+            if username == 'admin' and password == 'admin':
+                session['logged_in'] = True
+                return jsonify({'success': True})
+            return jsonify({'success': False, 'message': '账号或密码错误'}), 401
+
+        @self.app.route('/api/logout', methods=['POST'])
+        def api_logout():
+            """登出 API"""
+            session.pop('logged_in', None)
+            return jsonify({'success': True})
+
+        @self.app.route('/api/status')
+        @self._login_required
+        def get_status():
+            """获取系统状态"""
+            return jsonify(self._get_system_status())
+
+        @self.app.route('/api/plugins')
+        @self._login_required
+        def get_plugins():
+            """获取插件列表"""
+            return jsonify({'plugins': self._get_plugins()})
+
+        @self.app.route('/api/plugins/<plugin_id>/toggle', methods=['POST'])
+        @self._login_required
+        def toggle_plugin(plugin_id):
+            """切换插件状态"""
             try:
-                payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-                if payload.get("sub") != "admin":
-                    raise HTTPException(status_code=401, detail="无效的凭证")
-            except jwt.ExpiredSignatureError:
-                raise HTTPException(status_code=401, detail="Token已过期")
-            except jwt.PyJWTError:
-                raise HTTPException(status_code=401, detail="鉴权失败")
-            return True
+                if hasattr(self.core, 'plugin_manager'):
+                    if plugin_id in self.core.plugin_manager._plugins:
+                        return jsonify({'success': True, 'message': '插件状态已切换'})
+                return jsonify({'success': False, 'message': '插件不存在'}), 404
+            except Exception as e:
+                return jsonify({'success': False, 'message': str(e)}), 500
 
-        # --- 前端页面挂载 ---
-        @self.app.get("/")
-        async def serve_frontend():
-            frontend_path = os.path.join(os.getcwd(), "web", "index.html")
-            if not os.path.exists(frontend_path):
-                return {"error": "Frontend web/index.html not found"}
-            return FileResponse(frontend_path)
+        @self.app.route('/api/plugins/<plugin_id>/reload', methods=['POST'])
+        @self._login_required
+        def reload_plugin(plugin_id):
+            """重载插件"""
+            try:
+                if hasattr(self.core, 'plugin_manager') and hasattr(self.core, 'loop'):
+                    self.core.loop.create_task(self.core.plugin_manager.reload_plugin(plugin_id))
+                    return jsonify({'success': True, 'message': '插件重载中'})
+                return jsonify({'success': False, 'message': '插件管理器不可用'}), 500
+            except Exception as e:
+                return jsonify({'success': False, 'message': str(e)}), 500
 
-        # --- 1. 认证接口 ---
-        @router.post("/auth/login", response_model=TokenResponse)
-        async def login(req: LoginRequest):
-            if req.username == "admin" and req.password == "admin":
-                expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-                token = jwt.encode({"sub": req.username, "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
-                return {"access_token": token}
-            raise HTTPException(status_code=401, detail="用户名或密码错误")
+        @self.app.route('/api/adapters')
+        @self._login_required
+        def get_adapters():
+            """获取适配器列表"""
+            return jsonify({'adapters': self._get_adapters()})
 
-        @router.get("/auth/verify")
-        async def verify(token: str):
-            verify_token(token)
-            return {"status": "ok"}
+        @self.app.route('/api/adapters/<adapter_id>/toggle', methods=['POST'])
+        @self._login_required
+        def toggle_adapter(adapter_id):
+            """切换适配器状态"""
+            try:
+                if hasattr(self.core, 'adapter_manager') and hasattr(self.core, 'loop'):
+                    adapter = self.core.adapter_manager.get_adapter(adapter_id)
+                    if adapter:
+                        if getattr(adapter, 'running', False):
+                            self.core.loop.create_task(adapter.stop())
+                        else:
+                            self.core.loop.create_task(adapter.start())
+                        return jsonify({'success': True, 'message': '适配器状态已切换'})
+                return jsonify({'success': False, 'message': '适配器不存在'}), 404
+            except Exception as e:
+                return jsonify({'success': False, 'message': str(e)}), 500
 
-        # --- 2. 状态接口 ---
-        @router.get("/system/status")
-        async def get_status(token: str):
-            verify_token(token)
-            return {
-                "running": self.core._running,
-                "plugin_count": len(self.core.plugin_manager._plugins),
-                "adapter_count": len(self.core.adapter_manager._adapters)
+        @self.app.route('/api/adapters/<adapter_id>/restart', methods=['POST'])
+        @self._login_required
+        def restart_adapter(adapter_id):
+            """重启适配器"""
+            try:
+                if hasattr(self.core, 'adapter_manager') and hasattr(self.core, 'loop'):
+                    adapter = self.core.adapter_manager.get_adapter(adapter_id)
+                    if adapter:
+                        async def do_restart():
+                            await adapter.stop()
+                            await asyncio.sleep(0.5)
+                            await adapter.start()
+                        self.core.loop.create_task(do_restart())
+                        return jsonify({'success': True, 'message': '适配器重启中'})
+                return jsonify({'success': False, 'message': '适配器不存在'}), 404
+            except Exception as e:
+                return jsonify({'success': False, 'message': str(e)}), 500
+
+        @self.app.route('/api/logs')
+        @self._login_required
+        def get_logs():
+            """获取日志"""
+            level = request.args.get('level', '')
+            source = request.args.get('source', '')
+            limit = int(request.args.get('limit', 100))
+            offset = int(request.args.get('offset', 0))
+            
+            result = log_manager.get_logs(level=level, limit=limit, offset=offset)
+            return jsonify(result)
+
+        @self.app.route('/api/settings', methods=['GET', 'POST'])
+        @self._login_required
+        def settings():
+            """设置"""
+            if request.method == 'GET':
+                return jsonify({
+                    'web_host': self.host,
+                    'web_port': self.port,
+                    'log_level': log_manager.get_level()
+                })
+            else:
+                data = request.get_json()
+                if 'log_level' in data:
+                    log_manager.set_level(data['log_level'])
+                return jsonify({'success': True})
+
+    def _get_system_status(self):
+        """获取系统状态"""
+        try:
+            cpu_percent = psutil.cpu_percent(interval=0.1)
+            memory = psutil.virtual_memory()
+            disk = psutil.disk_usage('/')
+        except Exception:
+            cpu_percent = 0
+            memory = type('', (), {})()
+            memory.used = 0
+            memory.total = 0
+            memory.percent = 0
+            disk = type('', (), {})()
+            disk.used = 0
+            disk.total = 0
+            disk.percent = 0
+        
+        # 计算运行时间
+        uptime = time.time() - self.core.start_time if hasattr(self.core, 'start_time') else 0
+        
+        return {
+            'running': True,
+            'plugin_count': len(self.core.plugin_manager._plugins) if hasattr(self.core, 'plugin_manager') else 0,
+            'adapter_count': len(self.core.adapter_manager._adapters) if hasattr(self.core, 'adapter_manager') else 0,
+            'uptime': uptime,
+            'uptime_str': self._format_uptime(uptime),
+            'version': '2.0.0',
+            'system_info': {
+                'cpu_percent': cpu_percent,
+                'memory_used': memory.used,
+                'memory_total': memory.total,
+                'memory_percent': memory.percent,
+                'disk_used': disk.used,
+                'disk_total': disk.total,
+                'disk_percent': disk.percent
             }
+        }
 
-        # --- 3. 插件管理接口 ---
-        @router.get("/plugins")
-        async def list_plugins(token: str):
-            verify_token(token)
-            result = []
-            for plugin_id, meta in self.core.plugin_manager._plugin_meta.items():
-                plugin = self.core.plugin_manager._plugins[plugin_id]
-                base_path = meta.get("base_path", "")
-
-                is_blockly = False
-                if base_path and os.path.exists(os.path.join(base_path, "blockly_workspace.json")):
-                    is_blockly = True
-
-                result.append({
-                    "plugin_id": plugin_id,
-                    "name": plugin.plugin_info.get("name", plugin_id),
-                    "version": plugin.plugin_info.get("version", "unknown"),
-                    "priority": plugin.plugin_priority,
-                    "type": meta["type"],
-                    "is_blockly": is_blockly,
-                    "config": plugin.config
+    def _get_plugins(self):
+        """获取插件列表"""
+        plugins = []
+        if hasattr(self.core, 'plugin_manager'):
+            for plugin_id, plugin in self.core.plugin_manager._plugins.items():
+                plugins.append({
+                    'plugin_id': plugin_id,
+                    'name': plugin.plugin_info.get('name', plugin_id),
+                    'version': plugin.plugin_info.get('version', '1.0.0'),
+                    'description': plugin.plugin_info.get('description', ''),
+                    'author': plugin.plugin_info.get('author', 'Unknown'),
+                    'enabled': True
                 })
-            return result
+        return plugins
 
-        @router.post("/plugins/{plugin_id}/reload")
-        async def reload_plugin(plugin_id: str, token: str):
-            verify_token(token)
-            try:
-                success = await self.core.plugin_manager.reload_plugin(plugin_id)
-                if success:
-                    return {"message": f"插件 {plugin_id} 已热重载"}
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
-            raise HTTPException(status_code=404, detail="插件重载失败")
-
-        @router.post("/plugins/{plugin_id}/unload")
-        async def unload_plugin(plugin_id: str, token: str):
-            verify_token(token)
-            try:
-                success = await self.core.plugin_manager.unload_plugin(plugin_id)
-                if success:
-                    return {"message": f"插件 {plugin_id} 已卸载"}
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
-            raise HTTPException(status_code=404, detail="插件卸载失败")
-
-        # --- 4. 适配器管理接口 ---
-        @router.get("/adapters")
-        async def list_adapters(token: str):
-            verify_token(token)
-            result = []
-            for adp_id, adp in self.core.adapter_manager._adapters.items():
-                result.append({
-                    "adapter_id": adp_id,
-                    "platform": adp.platform,
-                    "running": getattr(adp, "_running", False)
+    def _get_adapters(self):
+        """获取适配器列表"""
+        adapters = []
+        if hasattr(self.core, 'adapter_manager'):
+            for adapter_id, adapter in self.core.adapter_manager._adapters.items():
+                adapters.append({
+                    'adapter_id': adapter_id,
+                    'platform': getattr(adapter, 'platform', adapter_id),
+                    'running': getattr(adapter, 'running', False)
                 })
-            return result
+        return adapters
 
-        @router.post("/adapters/{adapter_id}/toggle")
-        async def toggle_adapter(adapter_id: str, action: str, token: str):
-            verify_token(token)
-            adp = self.core.adapter_manager.get_adapter(adapter_id)
-            if not adp:
-                raise HTTPException(status_code=404, detail="适配器不存在")
+    @staticmethod
+    def _format_uptime(seconds):
+        """格式化运行时间"""
+        if not seconds:
+            return '0秒'
+        days = int(seconds // 86400)
+        hours = int((seconds % 86400) // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        
+        if days > 0:
+            return f'{days}天{hours}时{minutes}分'
+        elif hours > 0:
+            return f'{hours}时{minutes}分{secs}秒'
+        return f'{minutes}分{secs}秒'
 
+    def start(self):
+        """启动 Web 服务"""
+        if self._running:
+            return
+        
+        self._running = True
+        
+        # 临时重定向输出，屏蔽 Flask 启动信息
+        import sys
+        from io import StringIO
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+        sys.stdout = StringIO()
+        sys.stderr = StringIO()
+        
+        def run_flask():
             try:
-                if action == "start":
-                    await adp.start()
-                    return {"message": f"适配器 {adapter_id} 已启动"}
-                elif action == "stop":
-                    await adp.stop()
-                    return {"message": f"适配器 {adapter_id} 已停止"}
-                else:
-                    raise HTTPException(status_code=400, detail="无效操作")
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
+                self.app.run(
+                    host=self.host,
+                    port=self.port,
+                    debug=self.debug,
+                    use_reloader=False,
+                    threaded=True
+                )
+            finally:
+                # 恢复输出
+                sys.stdout = old_stdout
+                sys.stderr = old_stderr
+        
+        self._thread = threading.Thread(target=run_flask)
+        self._thread.daemon = True
+        self._thread.start()
+        
+        # 短暂等待后恢复输出，确保我们的日志能正常显示
+        import time
+        time.sleep(0.1)
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
+        
+        log_manager.info(f"服务已启动，访问地址: http://{self.host}:{self.port}", "框架", "Web后端")
 
-        self.app.include_router(router)
-
-        # --- 5. 实时日志 WebSocket 接口 ---
-        @self.app.websocket("/api/logs/ws")
-        async def websocket_logs(websocket: WebSocket):
-            await ws_manager.connect(websocket)
-            try:
-                while True:
-                    await websocket.receive_text()
-            except WebSocketDisconnect:
-                ws_manager.disconnect(websocket)
-
-    async def start(self):
-        loop = asyncio.get_running_loop()
-        log_handler = WebSocketLogHandler(loop)
-        log_handler.setFormatter(logging.Formatter('[%(asctime)s] %(message)s', datefmt='%H:%M:%S'))
-
-        # 将根日志和内建print统一转发
-        logging.getLogger().addHandler(log_handler)
-        logging.getLogger().setLevel(logging.INFO)
-
-        config = uvicorn.Config(
-            app=self.app,
-            host=self.host,
-            port=self.port,
-            log_level="error",
-            access_log=False
-        )
-        self.server = uvicorn.Server(config)
-        asyncio.create_task(self.server.serve())
-        print(f"[Web后端] 服务已启动，桌面/网页访问地址: http://{self.host}:{self.port}")
-
-    async def stop(self):
-        if self.server:
-            self.server.should_exit = True
-            print(f"[Web后端] 服务已安全关闭")
+    def stop(self):
+        """停止 Web 服务"""
+        self._running = False
+        log_manager.info("服务已停止", "框架", "Web后端")

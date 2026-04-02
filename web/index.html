@@ -2,259 +2,323 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ptilopsis 控制面板</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
-    <script src="https://unpkg.com/element-plus"></script>
-    <script src="https://unpkg.com/@element-plus/icons-vue"></script>
-    <style>
-        body { margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f2f3f5; }
-        #app { height: 100vh; display: flex; flex-direction: column; }
-        .el-header { background-color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.05); display: flex; align-items: center; justify-content: space-between; padding: 0 20px; z-index: 10; }
-        .logo { font-size: 20px; font-weight: bold; color: #409EFF; display: flex; align-items: center; gap: 10px; }
-        .log-terminal { background: #1e1e1e; color: #4af626; padding: 15px; border-radius: 6px; height: 300px; overflow-y: auto; font-family: Consolas, monospace; font-size: 13px; line-height: 1.5; margin-top: 15px; }
-        .login-card { width: 400px; margin: 100px auto; padding: 20px; text-align: center; }
-        .el-main { max-width: 1200px; margin: 0 auto; width: 100%; padding: 20px; }
-    </style>
+    <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
 <div id="app">
-    <div v-if="!isLoggedIn" style="height: 100vh; background: #eef2f6; overflow: hidden;">
-        <el-card class="login-card" shadow="hover">
-            <h2 style="color: #409EFF;">Ptilopsis Bot</h2>
-            <p style="color: #909399; margin-bottom: 30px;">白面鸮系统访问认证</p>
-            <el-input v-model="loginForm.username" placeholder="账号 (admin)" style="margin-bottom: 15px;"></el-input>
-            <el-input v-model="loginForm.password" placeholder="密码 (admin)" type="password" show-password style="margin-bottom: 20px;"></el-input>
-            <el-button type="primary" @click="handleLogin" style="width: 100%;" :loading="loading">系统登录</el-button>
-        </el-card>
+    <!-- 登录页面 -->
+    <div v-if="!isLoggedIn" class="login-page">
+        <div class="login-box">
+            <div class="login-header">
+                <div class="login-icon">🤖</div>
+                <h1>Ptilopsis Bot</h1>
+                <p>白面鸮系统访问认证</p>
+            </div>
+            <form @submit.prevent="handleLogin" class="login-form">
+                <input v-model="loginForm.username" placeholder="账号 (admin)" type="text" class="input-field" />
+                <input v-model="loginForm.password" placeholder="密码 (admin)" type="password" class="input-field" />
+                <p v-if="error" class="error-msg">{{ error }}</p>
+                <button type="submit" class="btn-primary btn-block" :disabled="loading">{{ loading ? '登录中...' : '系统登录' }}</button>
+            </form>
+        </div>
     </div>
 
-    <template v-else>
-        <el-header height="60px">
-            <div class="logo">
-                <el-icon><Monitor /></el-icon> Ptilopsis Dashboard
+    <!-- 主界面 -->
+    <div v-else class="app-layout">
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <span class="logo-icon">🤖</span>
+                <span class="logo-text">Ptilopsis</span>
             </div>
-            <div>
-                <el-tag type="success" style="margin-right: 15px;" v-if="systemStatus.running">系统运行中</el-tag>
-                <el-button size="small" type="danger" plain @click="logout">退出登录</el-button>
+            <nav class="sidebar-nav">
+                <a v-for="tab in tabs" :key="tab.name"
+                   :class="['nav-item', activeTab === tab.name ? 'active' : '']"
+                   @click.prevent="activeTab = tab.name"
+                   href="#">
+                    <span class="nav-icon">{{ tab.icon }}</span>
+                    <span>{{ tab.label }}</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <button @click="logout" class="btn-ghost">退出登录</button>
             </div>
-        </el-header>
+        </aside>
 
-        <el-main>
-            <el-tabs v-model="activeTab" class="demo-tabs">
-                <el-tab-pane label="系统概览" name="dashboard">
-                    <el-row :gutter="20" style="margin-bottom: 20px;">
-                        <el-col :span="8">
-                            <el-card shadow="hover">
-                                <template #header><b>已加载插件</b></template>
-                                <h2 style="margin:0; color:#409EFF;">{{ systemStatus.plugin_count }}</h2>
-                            </el-card>
-                        </el-col>
-                        <el-col :span="8">
-                            <el-card shadow="hover">
-                                <template #header><b>运行中适配器</b></template>
-                                <h2 style="margin:0; color:#67C23A;">{{ systemStatus.adapter_count }}</h2>
-                            </el-card>
-                        </el-col>
-                        <el-col :span="8">
-                            <el-card shadow="hover">
-                                <template #header><b>系统核心状态</b></template>
-                                <h2 style="margin:0; color:#E6A23C;">{{ systemStatus.running ? 'Active' : 'Stopped' }}</h2>
-                            </el-card>
-                        </el-col>
-                    </el-row>
-                    <el-card shadow="never">
-                        <template #header><b>实时控制台日志</b></template>
-                        <el-button size="small" @click="logs = []" style="margin-bottom: 10px;">清空日志</el-button>
-                        <div class="log-terminal" id="logBox">
-                            <div v-for="(log, idx) in logs" :key="idx">{{ log }}</div>
+        <!-- 主内容区 -->
+        <main class="main-area">
+            <!-- 顶部栏 -->
+            <header class="topbar">
+                <h2 class="page-title">{{ currentTabTitle }}</h2>
+                <div class="topbar-right">
+                    <span class="status-dot" :class="systemStatus.running ? 'online' : 'offline'"></span>
+                    <span class="status-text">{{ systemStatus.running ? '运行中' : '已停止' }}</span>
+                    <span class="uptime">⏱ {{ systemStatus.uptime_str }}</span>
+                </div>
+            </header>
+
+            <!-- 内容区域 -->
+            <section class="content-area">
+
+                <!-- 系统概览 -->
+                <div v-if="activeTab === 'dashboard'" class="view-container">
+                    <!-- 统计卡片 -->
+                    <div class="stats-row">
+                        <div class="stat-card blue">
+                            <div class="stat-info">
+                                <div class="stat-value">{{ systemStatus.plugin_count }}</div>
+                                <div class="stat-label">已加载插件</div>
+                            </div>
+                            <div class="stat-icon">📦</div>
                         </div>
-                    </el-card>
-                </el-tab-pane>
+                        <div class="stat-card green">
+                            <div class="stat-info">
+                                <div class="stat-value">{{ systemStatus.adapter_count }}</div>
+                                <div class="stat-label">运行中适配器</div>
+                            </div>
+                            <div class="stat-icon">🔌</div>
+                        </div>
+                        <div class="stat-card orange">
+                            <div class="stat-info">
+                                <div class="stat-value">{{ systemInfo.cpu_percent || 0 }}%</div>
+                                <div class="stat-label">CPU 使用率</div>
+                            </div>
+                            <div class="stat-icon">💻</div>
+                        </div>
+                        <div class="stat-card purple">
+                            <div class="stat-info">
+                                <div class="stat-value">{{ formatBytes(systemInfo.memory_used) }} / {{ formatBytes(systemInfo.memory_total) }}</div>
+                                <div class="stat-label">内存使用</div>
+                            </div>
+                            <div class="stat-icon">💾</div>
+                        </div>
+                    </div>
 
-                <el-tab-pane label="插件管理" name="plugins">
-                    <el-table :data="plugins" border style="width: 100%" v-loading="loading">
-                        <el-table-column prop="name" label="插件名称" width="180"></el-table-column>
-                        <el-table-column prop="plugin_id" label="标识 (ID)" width="150"></el-table-column>
-                        <el-table-column prop="version" label="版本" width="100"></el-table-column>
-                        <el-table-column label="开发类型" width="120">
-                            <template #default="scope">
-                                <el-tag :type="scope.row.is_blockly ? 'warning' : 'info'" size="small">
-                                    {{ scope.row.is_blockly ? '积木/Blockly' : 'Python 原生' }}
-                                </el-tag>
-                            </template>
-                        </el-table-column>
-                        <el-table-column label="操作">
-                            <template #default="scope">
-                                <el-button size="small" type="primary" plain @click="reloadPlugin(scope.row.plugin_id)">重载</el-button>
-                                <el-button size="small" type="danger" plain @click="unloadPlugin(scope.row.plugin_id)">卸载</el-button>
-                                <el-button size="small" type="warning" plain v-if="scope.row.is_blockly">可视化编辑</el-button>
-                            </template>
-                        </el-table-column>
-                    </el-table>
-                </el-tab-pane>
+                    <!-- 日志和资源 -->
+                    <div class="grid-2col">
+                        <!-- 实时日志 -->
+                        <div class="panel">
+                            <div class="panel-header">
+                                <h3>📄 实时控制台日志</h3>
+                                <div class="panel-actions">
+                                    <select v-model="logFilter.level" class="select-sm">
+                                        <option value="">全部级别</option>
+                                        <option value="DEBUG">DEBUG</option>
+                                        <option value="INFO">INFO</option>
+                                        <option value="WARNING">WARNING</option>
+                                        <option value="ERROR">ERROR</option>
+                                    </select>
+                                    <button @click="logs = []" class="btn-sm btn-outline">清空</button>
+                                    <button @click="queryLogs" class="btn-sm btn-primary">刷新</button>
+                                </div>
+                            </div>
+                            <div class="log-viewer">
+                                <div v-if="filteredLogs.length === 0" class="empty-hint">
+                                    <span class="empty-icon">📭</span>
+                                    <p>暂无日志记录</p>
+                                </div>
+                                <div v-for="(log, idx) in filteredLogs" :key="idx"
+                                     :class="['log-entry', 'level-' + (log.level || 'info').toLowerCase()]">
+                                    <span class="log-time">{{ log.time_short }}</span>
+                                    <span class="log-lv">[{{ log.level }}]</span>
+                                    <span class="log-src">[{{ log.source }}]</span>
+                                    <span class="log-msg">{{ log.message }}</span>
+                                </div>
+                            </div>
+                        </div>
 
-                <el-tab-pane label="适配器管理" name="adapters">
-                    <el-table :data="adapters" border style="width: 100%" v-loading="loading">
-                        <el-table-column prop="platform" label="平台" width="180"></el-table-column>
-                        <el-table-column prop="adapter_id" label="适配器 ID" width="200"></el-table-column>
-                        <el-table-column label="状态" width="120">
-                            <template #default="scope">
-                                <el-tag :type="scope.row.running ? 'success' : 'info'">
-                                    {{ scope.row.running ? '运行中' : '已停止' }}
-                                </el-tag>
-                            </template>
-                        </el-table-column>
-                        <el-table-column label="操作">
-                            <template #default="scope">
-                                <el-button size="small" :type="scope.row.running ? 'danger' : 'success'" @click="toggleAdapter(scope.row)">
-                                    {{ scope.row.running ? '停止' : '启动' }}
-                                </el-button>
-                            </template>
-                        </el-table-column>
-                    </el-table>
-                </el-tab-pane>
-            </el-tabs>
-        </el-main>
-    </template>
+                        <!-- 系统资源 -->
+                        <div class="panel">
+                            <div class="panel-header">
+                                <h3>📊 系统资源</h3>
+                            </div>
+                            <div class="resource-list">
+                                <div class="resource-item">
+                                    <div class="res-head">
+                                        <span class="res-icon">💻</span>
+                                        <span>CPU 使用率</span>
+                                        <strong>{{ systemInfo.cpu_percent || 0 }}%</strong>
+                                    </div>
+                                    <div class="progress-bar"><div class="progress-fill bg-blue" :style="{width: (systemInfo.cpu_percent||0)+'%'}"></div></div>
+                                </div>
+                                <div class="resource-item">
+                                    <div class="res-head">
+                                        <span class="res-icon">💾</span>
+                                        <span>内存使用</span>
+                                        <strong>{{ formatPercent(systemInfo.memory_percent) }}</strong>
+                                    </div>
+                                    <div class="progress-bar"><div class="progress-fill bg-green" :style="{width: (systemInfo.memory_percent||0)+'%'}"></div></div>
+                                </div>
+                                <div class="resource-item">
+                                    <div class="res-head">
+                                        <span class="res-icon">💿</span>
+                                        <span>磁盘使用</span>
+                                        <strong>{{ formatPercent(systemInfo.disk_percent) }}</strong>
+                                    </div>
+                                    <div class="progress-bar"><div class="progress-fill bg-orange" :style="{width: (systemInfo.disk_percent||0)+'%'}"></div></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 插件管理 -->
+                <div v-if="activeTab === 'plugins'" class="view-container">
+                    <div class="panel">
+                        <div class="panel-header">
+                            <h3>📦 插件列表</h3>
+                            <button @click="fetchPlugins" class="btn-primary btn-sm">刷新</button>
+                        </div>
+                        <table class="data-table">
+                            <thead>
+                                <tr><th>插件名称</th><th>ID</th><th>版本</th><th>描述</th><th>作者</th><th>状态</th><th>操作</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="plugin in plugins" :key="plugin.plugin_id">
+                                    <td><strong>{{ plugin.name }}</strong></td>
+                                    <td class="mono">{{ plugin.plugin_id }}</td>
+                                    <td>v{{ plugin.version }}</td>
+                                    <td>{{ plugin.description }}</td>
+                                    <td>{{ plugin.author }}</td>
+                                    <td><span :class="['badge', plugin.enabled ? 'badge-success' : 'badge-default']">{{ plugin.enabled ? '启用' : '禁用' }}</span></td>
+                                    <td>
+                                        <button @click="togglePlugin(plugin)" class="btn-sm btn-outline">{{ plugin.enabled ? '禁用' : '启用' }}</button>
+                                        <button @click="reloadPlugin(plugin.plugin_id)" class="btn-sm btn-outline">重载</button>
+                                    </td>
+                                </tr>
+                                <tr v-if="plugins.length === 0"><td colspan="7" class="empty-cell">暂无插件</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 适配器管理 -->
+                <div v-if="activeTab === 'adapters'" class="view-container">
+                    <div class="adapter-grid">
+                        <div v-for="adapter in adapters" :key="adapter.adapter_id" class="adapter-card">
+                            <div class="adapter-top">
+                                <div class="adapter-name">
+                                    <span class="adapter-icon">🔌</span>
+                                    <div>
+                                        <strong>{{ adapter.platform }}</strong>
+                                        <small class="mono">{{ adapter.adapter_id }}</small>
+                                    </div>
+                                </div>
+                                <span :class="['badge', adapter.running ? 'badge-success' : 'badge-default']">{{ adapter.running ? '运行中' : '已停止' }}</span>
+                            </div>
+                            <div class="adapter-actions">
+                                <button :class="['btn-sm', adapter.running ? 'btn-danger' : 'btn-success']" @click="toggleAdapter(adapter)">
+                                    {{ adapter.running ? '停止' : '启动' }}
+                                </button>
+                                <button class="btn-sm btn-outline" @click="restartAdapter(adapter.adapter_id)">重启</button>
+                            </div>
+                        </div>
+                        <div v-if="adapters.length === 0" class="empty-panel">暂无适配器</div>
+                    </div>
+                    <div style="text-align:right;margin-top:16px;">
+                        <button @click="fetchAdapters" class="btn-primary">刷新列表</button>
+                    </div>
+                </div>
+
+                <!-- 日志中心 -->
+                <div v-if="activeTab === 'logs'" class="view-container">
+                    <div class="grid-2col">
+                        <div class="panel">
+                            <div class="panel-header">
+                                <h3>📄 日志查看器</h3>
+                                <div class="panel-actions">
+                                    <select v-model="logQuery.level" class="select-sm">
+                                        <option value="">全部级别</option>
+                                        <option value="DEBUG">DEBUG</option>
+                                        <option value="INFO">INFO</option>
+                                        <option value="WARNING">WARNING</option>
+                                        <option value="ERROR">ERROR</option>
+                                    </select>
+                                    <input v-model="logQuery.source" placeholder="来源筛选" class="input-sm" />
+                                    <button @click="queryLogs" class="btn-primary btn-sm">查询</button>
+                                    <button @click="clearLogs" class="btn-sm btn-outline">清空</button>
+                                </div>
+                            </div>
+                            <div class="log-viewer tall">
+                                <div v-if="queriedLogs.length === 0" class="empty-hint">
+                                    <span class="empty-icon">📭</span>
+                                    <p>暂无日志记录</p>
+                                </div>
+                                <div v-for="(log, idx) in queriedLogs" :key="idx"
+                                     :class="['log-entry', 'level-' + (log.level || 'info').toLowerCase()]">
+                                    <span class="log-time">{{ log.time }}</span>
+                                    <span class="log-lv">[{{ log.level }}]</span>
+                                    <span class="log-src">[{{ log.source }}]</span>
+                                    <span class="log-msg">{{ log.message }}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="side-panel">
+                            <div class="panel">
+                                <div class="panel-header"><h3>⚙️ 日志设置</h3></div>
+                                <div class="form-group">
+                                    <label>日志级别</label>
+                                    <select v-model="currentLogLevel" @change="setLogLevel" class="select-full">
+                                        <option value="DEBUG">DEBUG</option>
+                                        <option value="INFO">INFO</option>
+                                        <option value="WARNING">WARNING</option>
+                                        <option value="ERROR">ERROR</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 系统设置 -->
+                <div v-if="activeTab === 'settings'" class="view-container">
+                    <div class="settings-grid">
+                        <div class="panel">
+                            <div class="panel-header"><h3>⚙️ 面板设置</h3></div>
+                            <div class="form-group">
+                                <label>主题模式</label>
+                                <select v-model="settings.web_panel.theme" class="select-full">
+                                    <option value="light">浅色模式</option>
+                                    <option value="dark">深色模式</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" v-model="settings.web_panel.log_auto_scroll" />
+                                    自动滚动日志
+                                </label>
+                            </div>
+                        </div>
+                        <div class="panel">
+                            <div class="panel-header"><h3>🔧 系统设置</h3></div>
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" v-model="settings.system.auto_start_adapters" />
+                                    启动时自动加载适配器
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" v-model="settings.system.plugin_hot_reload" />
+                                    启用插件热重载
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="action-bar">
+                        <button @click="saveSettings" class="btn-primary">保存设置</button>
+                        <button @click="fetchSettings" class="btn-outline">重置</button>
+                    </div>
+                </div>
+
+            </section>
+        </main>
+    </div>
 </div>
-
-<script>
-    const { createApp, ref, reactive, onMounted, nextTick } = Vue;
-
-    const app = createApp({
-        setup() {
-            const baseUrl = 'http://127.0.0.1:8088/api';
-            const isLoggedIn = ref(false);
-            const token = ref(localStorage.getItem('pt_token') || '');
-            const activeTab = ref('dashboard');
-            const loading = ref(false);
-
-            const loginForm = reactive({ username: '', password: '' });
-            const systemStatus = reactive({ running: false, plugin_count: 0, adapter_count: 0 });
-            const plugins = ref([]);
-            const adapters = ref([]);
-            const logs = ref([]);
-            let ws = null;
-
-            // 封装自带 Token 的 Fetch
-            const apiFetch = async (url, options = {}) => {
-                options.headers = { ...options.headers, 'Content-Type': 'application/json' };
-                const res = await fetch(`${baseUrl}${url}?token=${token.value}`, options);
-                if (res.status === 401) { logout(); throw new Error('Auth Failed'); }
-                return res.json();
-            };
-
-            const handleLogin = async () => {
-                loading.value = true;
-                try {
-                    const res = await fetch(`${baseUrl}/auth/login`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(loginForm)
-                    });
-                    if (res.ok) {
-                        const data = await res.json();
-                        token.value = data.access_token;
-                        localStorage.setItem('pt_token', token.value);
-                        isLoggedIn.value = true;
-                        initData();
-                    } else {
-                        ElementPlus.ElMessage.error("登录失败，账号或密码错误");
-                    }
-                } finally {
-                    loading.value = false;
-                }
-            };
-
-            const logout = () => {
-                token.value = '';
-                localStorage.removeItem('pt_token');
-                isLoggedIn.value = false;
-                if(ws) ws.close();
-            };
-
-            const initData = async () => {
-                try {
-                    // 验证Token
-                    await apiFetch('/auth/verify');
-                    isLoggedIn.value = true;
-                    fetchStatus();
-                    fetchPlugins();
-                    fetchAdapters();
-                    initWebSocket();
-                } catch (e) {
-                    logout();
-                }
-            };
-
-            const fetchStatus = async () => {
-                const data = await apiFetch('/system/status');
-                Object.assign(systemStatus, data);
-            };
-
-            const fetchPlugins = async () => {
-                loading.value = true;
-                plugins.value = await apiFetch('/plugins');
-                loading.value = false;
-            };
-
-            const reloadPlugin = async (id) => {
-                await apiFetch(`/plugins/${id}/reload`, { method: 'POST' });
-                ElementPlus.ElMessage.success(`插件 ${id} 重载成功`);
-                fetchPlugins();
-            };
-
-            const unloadPlugin = async (id) => {
-                await apiFetch(`/plugins/${id}/unload`, { method: 'POST' });
-                ElementPlus.ElMessage.success(`插件 ${id} 卸载成功`);
-                fetchPlugins();
-            };
-
-            const fetchAdapters = async () => {
-                loading.value = true;
-                adapters.value = await apiFetch('/adapters');
-                loading.value = false;
-            };
-
-            const toggleAdapter = async (row) => {
-                const action = row.running ? 'stop' : 'start';
-                await apiFetch(`/adapters/${row.adapter_id}/toggle?action=${action}`, { method: 'POST' });
-                ElementPlus.ElMessage.success(`适配器操作成功`);
-                fetchAdapters();
-            };
-
-            const initWebSocket = () => {
-                if (ws) ws.close();
-                ws = new WebSocket('ws://127.0.0.1:8088/api/logs/ws');
-                ws.onmessage = (event) => {
-                    logs.value.push(event.data);
-                    if (logs.value.length > 200) logs.value.shift(); // 保留最新200条
-                    nextTick(() => {
-                        const box = document.getElementById('logBox');
-                        if(box) box.scrollTop = box.scrollHeight;
-                    });
-                };
-            };
-
-            onMounted(() => {
-                if (token.value) initData();
-            });
-
-            return {
-                isLoggedIn, loginForm, handleLogin, logout, loading,
-                activeTab, systemStatus, plugins, adapters, logs,
-                reloadPlugin, unloadPlugin, toggleAdapter
-            }
-        }
-    });
-
-    // 注册所有图标
-    for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
-        app.component(key, component);
-    }
-    app.use(ElementPlus);
-    app.mount('#app');
-</script>
+<script src="/js/app.js"></script>
 </body>
 </html>
