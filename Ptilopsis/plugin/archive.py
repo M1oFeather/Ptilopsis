@@ -2,14 +2,14 @@
 import os
 import json
 import zipfile
-from typing import Optional
+from typing import Optional, List
 from shutil import rmtree
 
 
 class PluginArchiveHandler:
     """压缩包插件处理器，支持自定义后缀的zip格式压缩包"""
 
-    def __init__(self, cache_dir: str, allowed_suffixes: list[str]):
+    def __init__(self, cache_dir: str, allowed_suffixes: List[str]):
         self.cache_dir = cache_dir
         self.allowed_suffixes = [s.lower() for s in allowed_suffixes]
         # 初始化缓存目录

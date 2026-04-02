@@ -154,6 +154,58 @@ class BaseAdapter(ABC):
         """处理加群请求"""
         pass
 
+    # ==================== 扩展API ====================
+    
+    @abstractmethod
+    async def get_login_info(self) -> Dict[str, Any]:
+        """获取登录号信息"""
+        pass
+
+    @abstractmethod
+    async def set_group_card(self, group_id: str, user_id: str, card: str = "") -> None:
+        """设置群名片（群备注）"""
+        pass
+
+    @abstractmethod
+    async def set_group_name(self, group_id: str, group_name: str) -> None:
+        """设置群名"""
+        pass
+
+    @abstractmethod
+    async def set_group_leave(self, group_id: str, is_dismiss: bool = False) -> None:
+        """退出群组"""
+        pass
+
+    @abstractmethod
+    async def send_like(self, user_id: str, times: int = 1) -> None:
+        """发送好友赞"""
+        pass
+
+    @abstractmethod
+    async def get_forward_msg(self, message_id: str) -> Dict[str, Any]:
+        """获取合并转发消息"""
+        pass
+
+    @abstractmethod
+    async def get_self_info(self) -> Dict[str, Any]:
+        """获取机器人自身信息（OneBot 12）"""
+        pass
+
+    @abstractmethod
+    async def get_status(self) -> Dict[str, Any]:
+        """获取运行状态"""
+        pass
+
+    @abstractmethod
+    async def get_version(self) -> Dict[str, Any]:
+        """获取版本信息"""
+        pass
+
+    @abstractmethod
+    async def get_supported_actions(self) -> List[str]:
+        """获取支持的动作列表"""
+        pass
+
     # ==================== 内部工具方法 ====================
     async def _publish_event(self, event: BaseEvent) -> None:
         """将事件发布到事件总线"""

@@ -3,7 +3,7 @@ import os
 import sys
 import json
 import importlib.util
-from typing import Dict, Optional, Type
+from typing import Dict, Optional, Type, Tuple
 from ..core import Core
 from .base import BasePlugin
 from .archive import PluginArchiveHandler, SecurityError
@@ -39,7 +39,7 @@ class PluginManager:
         spec.loader.exec_module(module)
         return module
 
-    def _load_plugin_config(self, plugin_base_path: str) -> tuple[dict, dict]:
+    def _load_plugin_config(self, plugin_base_path: str) -> Tuple[dict, dict]:
         """加载插件配置，合并默认配置和用户自定义配置"""
         # 读取插件内置config.json
         config_path = os.path.join(plugin_base_path, "config.json")

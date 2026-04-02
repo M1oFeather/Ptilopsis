@@ -38,6 +38,15 @@ class OneBot12Adapter(BaseAdapter):
         self.heartbeat_interval = self.config.get("heartbeat_interval", 5000)
         # 自身ID
         self.self_id: Optional[str] = None
+        # 状态管理
+        self.status = {
+            "online": False,
+            "connected": False,
+            "last_heartbeat": 0,
+            "error_count": 0
+        }
+        # 健康检查配置
+        self.health_check_interval = self.config.get("health_check_interval", 30)  # 秒
 
     async def start(self) -> None:
         """启动反向WebSocket服务"""
@@ -49,7 +58,43 @@ class OneBot12Adapter(BaseAdapter):
             ping_interval=self.heartbeat_interval / 1000,
             ping_timeout=self.heartbeat_interval * 2 / 1000
         )
+        # 启动健康检查
+        asyncio.create_task(self._health_check())
         print(f"[OneBot12] 反向WebSocket服务已启动，监听 {self.ws_host}:{self.ws_port}")
+
+    async def _health_check(self):
+        """健康检查任务"""
+        while self._running:
+            try:
+                await asyncio.sleep(self.health_check_interval)
+                # 检查连接状态
+                if self.websocket and self.websocket.open:
+                    self.status["connected"] = True
+                else:
+                    self.status["connected"] = False
+                
+                # 检查心跳状态
+                current_time = asyncio.get_event_loop().time()
+                if current_time - self.status["last_heartbeat"] > self.heartbeat_interval * 3 / 1000:
+                    self.status["online"] = False
+                else:
+                    self.status["online"] = True
+            except Exception as e:
+                print(f"[OneBot12] 健康检查出错: {e}")
+
+    def get_health_status(self) -> Dict[str, Any]:
+        """获取健康状态"""
+        return {
+            "status": "ok" if self.status["online"] and self.status["connected"] else "error",
+            "details": {
+                "online": self.status["online"],
+                "connected": self.status["connected"],
+                "last_heartbeat": self.status["last_heartbeat"],
+                "error_count": self.status["error_count"],
+                "websocket_status": "open" if (self.websocket and self.websocket.open) else "closed",
+                "self_id": self.self_id
+            }
+        }
 
     async def stop(self) -> None:
         """停止服务，清理资源"""
@@ -117,6 +162,7 @@ class OneBot12Adapter(BaseAdapter):
         if type_field == "meta":
             detail_type = raw_event.get("detail_type")
             if detail_type == "heartbeat":
+                self.status["last_heartbeat"] = asyncio.get_event_loop().time()
                 event = HeartbeatEvent(
                     adapter=self,
                     raw_event=raw_event,
@@ -211,7 +257,7 @@ class OneBot12Adapter(BaseAdapter):
                 await self._publish_event(event)
             return
 
-    async def _call_action(self, action: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def _call_action(self, action: str, params: Dict[str, Any] = None, retry: int = 1) -> Dict[str, Any]:
         """调用OneBot 12动作API"""
         if not self.websocket or self.websocket.closed:
             raise ConnectionError("OneBot 12 连接未建立")
@@ -230,10 +276,24 @@ class OneBot12Adapter(BaseAdapter):
 
         try:
             await self.websocket.send(json.dumps(payload))
-            return await asyncio.wait_for(future, timeout=30)
+            response = await asyncio.wait_for(future, timeout=30)
+            
+            # 检查响应状态
+            if response.get("status") != "ok":
+                retcode = response.get("retcode", -1)
+                message = response.get("message", "未知错误")
+                raise RuntimeError(f"OneBot 12 动作 {action} 执行失败: {message} (retcode: {retcode})")
+            
+            return response
         except asyncio.TimeoutError:
             self._action_futures.pop(echo, None)
+            if retry > 0:
+                print(f"[OneBot12] 动作 {action} 超时，尝试重试...")
+                return await self._call_action(action, params, retry=retry-1)
             raise TimeoutError(f"OneBot 12 动作 {action} 响应超时")
+        except websockets.exceptions.ConnectionClosed:
+            self._action_futures.pop(echo, None)
+            raise ConnectionError("OneBot 12 连接已关闭")
         except Exception as e:
             self._action_futures.pop(echo, None)
             raise e
@@ -333,3 +393,61 @@ class OneBot12Adapter(BaseAdapter):
         action = "approve_group_request" if approve else "reject_group_request"
         params = {"request_id": flag, "reason": reason}
         await self._call_action(action, params)
+
+    # ==================== 扩展API实现 ====================
+    async def get_login_info(self) -> Dict[str, Any]:
+        return await self.get_self_info()
+
+    async def set_group_card(self, group_id: str, user_id: str, card: str = "") -> None:
+        await self._call_action("set_group_card", {
+            "group_id": group_id,
+            "user_id": user_id,
+            "card": card
+        })
+
+    async def set_group_name(self, group_id: str, group_name: str) -> None:
+        await self._call_action("set_group_name", {
+            "group_id": group_id,
+            "group_name": group_name
+        })
+
+    async def set_group_leave(self, group_id: str, is_dismiss: bool = False) -> None:
+        await self._call_action("leave_group", {
+            "group_id": group_id
+        })
+
+    async def send_like(self, user_id: str, times: int = 1) -> None:
+        await self._call_action("send_like", {
+            "user_id": user_id,
+            "times": times
+        })
+
+    async def get_forward_msg(self, message_id: str) -> Dict[str, Any]:
+        resp = await self._call_action("get_forward_msg", {
+            "message_id": message_id
+        })
+        return resp.get("data", {})
+
+    async def get_self_info(self) -> Dict[str, Any]:
+        resp = await self._call_action("get_self_info")
+        return resp.get("data", {})
+
+    async def get_status(self) -> Dict[str, Any]:
+        resp = await self._call_action("get_status")
+        return resp.get("data", {})
+
+    async def get_version(self) -> Dict[str, Any]:
+        resp = await self._call_action("get_version")
+        return resp.get("data", {})
+
+    async def get_supported_actions(self) -> List[str]:
+        return [
+            "send_message", "delete_message", "get_message", "get_user_info",
+            "get_friend_list", "get_group_info", "get_group_list",
+            "get_group_member_info", "get_group_member_list", "kick_group_member",
+            "ban_group_member", "unban_group_member", "set_group_whole_ban",
+            "set_group_admin", "approve_friend_request", "reject_friend_request",
+            "approve_group_request", "reject_group_request", "set_group_card",
+            "set_group_name", "leave_group", "send_like", "get_forward_msg",
+            "get_self_info", "get_status", "get_version"
+        ]

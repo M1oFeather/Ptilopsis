@@ -47,6 +47,85 @@ class MessageSegment:
     def at(user_id: Union[str, int], name: Optional[str] = None) -> "MessageSegment":
         return MessageSegment("at", {"qq": str(user_id), "name": name})
 
+    @staticmethod
+    def face(id: int) -> "MessageSegment":
+        """QQ表情"""
+        return MessageSegment("face", {"id": id})
+
+    @staticmethod
+    def record(file: str, url: Optional[str] = None) -> "MessageSegment":
+        """语音"""
+        return MessageSegment("record", {"file": file, "url": url})
+
+    @staticmethod
+    def video(file: str, url: Optional[str] = None) -> "MessageSegment":
+        """短视频"""
+        return MessageSegment("video", {"file": file, "url": url})
+
+    @staticmethod
+    def reply(message_id: str) -> "MessageSegment":
+        """回复"""
+        return MessageSegment("reply", {"id": message_id})
+
+    @staticmethod
+    def share(url: str, title: str, content: str = "", image_url: str = "") -> "MessageSegment":
+        """链接分享"""
+        return MessageSegment("share", {
+            "url": url,
+            "title": title,
+            "content": content,
+            "image_url": image_url
+        })
+
+    @staticmethod
+    def music(type: str, id: str, url: str = "", title: str = "", content: str = "", image_url: str = "") -> "MessageSegment":
+        """音乐分享"""
+        return MessageSegment("music", {
+            "type": type,
+            "id": id,
+            "url": url,
+            "title": title,
+            "content": content,
+            "image_url": image_url
+        })
+
+    @staticmethod
+    def forward(nodes: List[Dict]) -> "MessageSegment":
+        """合并转发"""
+        return MessageSegment("forward", {"content": nodes})
+
+    @staticmethod
+    def node(user_id: str, nickname: str, content: Union[str, List["MessageSegment"]], time: int = None) -> Dict:
+        """合并转发节点"""
+        if isinstance(content, str):
+            content = [MessageSegment.text(content)]
+        return {
+            "user_id": user_id,
+            "nickname": nickname,
+            "content": content,
+            "time": time
+        }
+
+    @staticmethod
+    def xml(data: str) -> "MessageSegment":
+        """XML消息"""
+        return MessageSegment("xml", {"data": data})
+
+    @staticmethod
+    def json(data: str) -> "MessageSegment":
+        """JSON消息"""
+        return MessageSegment("json", {"data": data})
+
+    @staticmethod
+    def poke(user_id: Union[str, int]) -> "MessageSegment":
+        """戳一戳"""
+        return MessageSegment("poke", {"qq": str(user_id)})
+
+    @staticmethod
+    def markdown(content: str) -> "MessageSegment":
+        """Markdown消息"""
+        return MessageSegment("markdown", {"content": content})
+
     def __str__(self) -> str:
         if self.type == "text":
             return self.data.get("text", "")
@@ -287,3 +366,143 @@ class GroupRequestEvent(RequestEvent):
     async def reject(self, reason: str = "") -> None:
         """拒绝加群请求"""
         await self.adapter.handle_group_request(self.flag, self.sub_type, approve=False, reason=reason)
+
+
+# ==================== 扩展事件类型 ====================
+
+
+# ==================== 通知事件扩展 ====================
+
+
+class GroupRecallEvent(NoticeEvent):
+    """群消息撤回事件"""
+
+    def __init__(self, adapter: BaseAdapter, raw_event: Dict[str, Any], group_id: str, user_id: str, operator_id: str, message_id: str):
+        super().__init__(adapter, raw_event, "group_recall")
+        self.group_id = group_id
+        self.user_id = user_id
+        self.operator_id = operator_id
+        self.message_id = message_id
+
+
+class FriendRecallEvent(NoticeEvent):
+    """好友消息撤回事件"""
+
+    def __init__(self, adapter: BaseAdapter, raw_event: Dict[str, Any], user_id: str, message_id: str):
+        super().__init__(adapter, raw_event, "friend_recall")
+        self.user_id = user_id
+        self.message_id = message_id
+
+
+class GroupAdminEvent(NoticeEvent):
+    """群管理员变动事件"""
+
+    def __init__(self, adapter: BaseAdapter, raw_event: Dict[str, Any], group_id: str, user_id: str, enable: bool):
+        super().__init__(adapter, raw_event, "group_admin")
+        self.group_id = group_id
+        self.user_id = user_id
+        self.enable = enable  # True为设置管理员，False为取消管理员
+
+
+class GroupUploadEvent(NoticeEvent):
+    """群文件上传事件"""
+
+    def __init__(self, adapter: BaseAdapter, raw_event: Dict[str, Any], group_id: str, user_id: str, file: Dict[str, Any]):
+        super().__init__(adapter, raw_event, "group_upload")
+        self.group_id = group_id
+        self.user_id = user_id
+        self.file = file
+
+
+class FriendAddEvent(NoticeEvent):
+    """好友添加事件"""
+
+    def __init__(self, adapter: BaseAdapter, raw_event: Dict[str, Any], user_id: str):
+        super().__init__(adapter, raw_event, "friend_add")
+        self.user_id = user_id
+
+
+class GroupNameUpdateEvent(NoticeEvent):
+    """群名称变更事件"""
+
+    def __init__(self, adapter: BaseAdapter, raw_event: Dict[str, Any], group_id: str, group_name: str, operator_id: str):
+        super().__init__(adapter, raw_event, "group_name_update")
+        self.group_id = group_id
+        self.group_name = group_name
+        self.operator_id = operator_id
+
+
+class GroupCardUpdateEvent(NoticeEvent):
+    """群名片变更事件"""
+
+    def __init__(self, adapter: BaseAdapter, raw_event: Dict[str, Any], group_id: str, user_id: str, card: str):
+        super().__init__(adapter, raw_event, "group_card_update")
+        self.group_id = group_id
+        self.user_id = user_id
+        self.card = card
+
+
+class GroupHonorUpdateEvent(NoticeEvent):
+    """群成员荣誉变更事件"""
+
+    def __init__(self, adapter: BaseAdapter, raw_event: Dict[str, Any], group_id: str, user_id: str, honor_type: str):
+        super().__init__(adapter, raw_event, "group_honor_update")
+        self.group_id = group_id
+        self.user_id = user_id
+        self.honor_type = honor_type
+
+
+class PokeEvent(NoticeEvent):
+    """戳一戳事件"""
+
+    def __init__(self, adapter: BaseAdapter, raw_event: Dict[str, Any], user_id: str, target_id: str, group_id: str = None):
+        super().__init__(adapter, raw_event, "poke")
+        self.user_id = user_id
+        self.target_id = target_id
+        self.group_id = group_id
+
+
+class GroupLuckyKingEvent(NoticeEvent):
+    """群红包运气王事件"""
+
+    def __init__(self, adapter: BaseAdapter, raw_event: Dict[str, Any], group_id: str, user_id: str, lucky_king_id: str):
+        super().__init__(adapter, raw_event, "group_lucky_king")
+        self.group_id = group_id
+        self.user_id = user_id  # 发红包的人
+        self.lucky_king_id = lucky_king_id  # 运气王
+
+
+# ==================== 消息事件扩展 ====================
+
+
+class ChannelMessageEvent(MessageEvent):
+    """频道消息事件（OneBot 12）"""
+
+    def __init__(self, *args, guild_id: str, channel_id: str, **kwargs):
+        super().__init__(*args, scene=MessageScene.CHANNEL, channel_id=channel_id, **kwargs)
+        self.guild_id = guild_id
+
+    async def reply(
+            self,
+            content: Union[str, List[MessageSegment]],
+            auto_escape: bool = False,
+            at_sender: bool = False
+    ) -> str:
+        """回复频道消息"""
+        if at_sender:
+            if isinstance(content, str):
+                content = f"[CQ:at,qq={self.user_id}] {content}"
+            else:
+                content.insert(0, MessageSegment.at(self.user_id))
+        return await self.adapter.send_channel_message(self.guild_id, self.channel_id, content)
+
+
+# ==================== 元事件扩展 ====================
+
+
+class LifecycleEvent(MetaEvent):
+    """生命周期事件"""
+
+    def __init__(self, adapter: BaseAdapter, raw_event: Dict[str, Any], lifecycle_type: str):
+        super().__init__(adapter, raw_event, "lifecycle")
+        self.lifecycle_type = lifecycle_type  # enable、disable、connect、disconnect等

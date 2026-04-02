@@ -40,13 +40,18 @@ async def main():
 
     # 2. 启动托盘图标，并绑定桌面面板唤起动作
     icon_path = str(Path(__file__).parent / "assets" / "ptilopsis_icon.png")
-    tray_instance = PtilopsisTray(
-        icon_path=icon_path,
-        on_quit=on_quit,
-        on_open_panel=open_desktop_panel
-    )
-    tray_instance.start()
-    tray_instance.notify("白面鸮已启动", "核心模块加载完成，双击托盘可打开控制面板。")
+    # 检查图标文件是否存在
+    if not os.path.exists(icon_path):
+        print(f"[警告] 托盘图标文件不存在: {icon_path}")
+        print("[系统] 白面鸮已启动，核心模块加载完成。")
+    else:
+        tray_instance = PtilopsisTray(
+            icon_path=icon_path,
+            on_quit=on_quit,
+            on_open_panel=open_desktop_panel
+        )
+        tray_instance.start()
+        tray_instance.notify("白面鸮已启动", "核心模块加载完成，双击托盘可打开控制面板。")
 
     # 3. 启动 Bot 核心
     await core_instance.start()
