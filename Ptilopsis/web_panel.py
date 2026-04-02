@@ -129,6 +129,76 @@ class WebPanelManager:
             """获取适配器列表"""
             return jsonify({'adapters': self._get_adapters()})
 
+        @self.app.route('/api/adapters/types')
+        @self._login_required
+        def get_adapter_types():
+            """获取可用的适配器类型列表"""
+            adapter_types = [
+                {
+                    'type': 'onebot11',
+                    'name': 'OneBot 11',
+                    'description': 'OneBot 11 协议适配器，支持QQ机器人'
+                },
+                {
+                    'type': 'onebot12',
+                    'name': 'OneBot 12',
+                    'description': 'OneBot 12 协议适配器，支持多平台'
+                },
+                {
+                    'type': 'console',
+                    'name': '控制台',
+                    'description': '控制台适配器，用于测试和调试'
+                }
+            ]
+            return jsonify({'types': adapter_types})
+
+        @self.app.route('/api/adapters/types/<adapter_type>/schema')
+        @self._login_required
+        def get_adapter_schema(adapter_type):
+            """获取指定适配器类型的配置 schema"""
+            try:
+                if adapter_type == 'onebot11':
+                    try:
+                        from Ptilopsis.adapter.onebot11 import OneBot11Adapter
+                        schema = OneBot11Adapter.get_config_schema()
+                    except Exception:
+                        schema = []
+                elif adapter_type == 'onebot12':
+                    try:
+                        from Ptilopsis.adapter.onebot12 import OneBot12Adapter
+                        schema = OneBot12Adapter.get_config_schema()
+                    except Exception:
+                        schema = []
+                elif adapter_type == 'console':
+                    try:
+                        from Ptilopsis.adapter.console_adapter import ConsoleAdapter
+                        if hasattr(ConsoleAdapter, 'get_config_schema'):
+                            schema = ConsoleAdapter.get_config_schema()
+                        else:
+                            schema = []
+                    except Exception:
+                        schema = []
+                else:
+                    return jsonify({'success': False, 'message': '不支持的适配器类型'}), 400
+                
+                # 将 schema 转换为可序列化的格式
+                serializable_schema = []
+                for item in schema:
+                    item_dict = {
+                        'key': item.key,
+                        'type': item.type.__name__,
+                        'required': item.required,
+                        'default': item.default,
+                        'description': item.description
+                    }
+                    if item.choices:
+                        item_dict['choices'] = item.choices
+                    serializable_schema.append(item_dict)
+                
+                return jsonify({'success': True, 'schema': serializable_schema})
+            except Exception as e:
+                return jsonify({'success': False, 'message': str(e)}), 500
+
         @self.app.route('/api/adapters/<adapter_id>/toggle', methods=['POST'])
         @self._login_required
         def toggle_adapter(adapter_id):
@@ -160,6 +230,45 @@ class WebPanelManager:
                             await adapter.start()
                         self.core.loop.create_task(do_restart())
                         return jsonify({'success': True, 'message': '适配器重启中'})
+                return jsonify({'success': False, 'message': '适配器不存在'}), 404
+            except Exception as e:
+                return jsonify({'success': False, 'message': str(e)}), 500
+
+        @self.app.route('/api/adapters/create', methods=['POST'])
+        @self._login_required
+        def create_adapter():
+            """创建新适配器"""
+            try:
+                data = request.get_json()
+                adapter_type = data.get('type')
+                adapter_id = data.get('id')
+                config = data.get('config', {})
+
+                if not adapter_type or not adapter_id:
+                    return jsonify({'success': False, 'message': '类型和ID不能为空'}), 400
+
+                if hasattr(self.core, 'adapter_manager') and hasattr(self.core, 'loop'):
+                    adapter = self.core.adapter_manager.create_adapter(
+                        adapter_type, adapter_id, config
+                    )
+                    self.core.loop.create_task(adapter.start())
+                    return jsonify({'success': True, 'message': f'适配器 {adapter_id} 已创建并启动'})
+
+                return jsonify({'success': False, 'message': '适配器管理器不可用'}), 500
+            except Exception as e:
+                return jsonify({'success': False, 'message': str(e)}), 500
+
+        @self.app.route('/api/adapters/<adapter_id>/remove', methods=['POST'])
+        @self._login_required
+        def remove_adapter(adapter_id):
+            """移除适配器"""
+            try:
+                if hasattr(self.core, 'adapter_manager') and hasattr(self.core, 'loop'):
+                    adapter = self.core.adapter_manager.get_adapter(adapter_id)
+                    if adapter:
+                        self.core.loop.create_task(adapter.stop())
+                        self.core.adapter_manager.remove_adapter(adapter_id)
+                        return jsonify({'success': True, 'message': f'适配器 {adapter_id} 已移除'})
                 return jsonify({'success': False, 'message': '适配器不存在'}), 404
             except Exception as e:
                 return jsonify({'success': False, 'message': str(e)}), 500
@@ -250,11 +359,35 @@ class WebPanelManager:
         adapters = []
         if hasattr(self.core, 'adapter_manager'):
             for adapter_id, adapter in self.core.adapter_manager._adapters.items():
-                adapters.append({
+                # 获取适配器基本信息
+                adapter_info = {
                     'adapter_id': adapter_id,
                     'platform': getattr(adapter, 'platform', adapter_id),
-                    'running': getattr(adapter, 'running', False)
-                })
+                    'name': getattr(adapter, 'NAME', getattr(adapter, 'platform', adapter_id)),
+                    'version': getattr(adapter, 'VERSION', '1.0.0'),
+                    'running': getattr(adapter, 'running', False),
+                    'connection_mode': getattr(adapter, 'connection_mode', 'unknown'),
+                    'host': getattr(adapter, 'host', '0.0.0.0'),
+                    'port': getattr(adapter, 'port', 0),
+                    'config': getattr(adapter, 'config', {})
+                }
+                
+                # 获取适配器能力信息（如果有）
+                if hasattr(adapter, 'get_capabilities_summary'):
+                    try:
+                        adapter_info['capabilities'] = adapter.get_capabilities_summary()
+                    except Exception:
+                        adapter_info['capabilities'] = {}
+                
+                # 获取适配器完整信息（如果有）
+                if hasattr(adapter, 'get_info'):
+                    try:
+                        info = adapter.get_info()
+                        adapter_info['full_info'] = info
+                    except Exception:
+                        pass
+                
+                adapters.append(adapter_info)
         return adapters
 
     @staticmethod

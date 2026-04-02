@@ -27,15 +27,19 @@ class AdapterManager:
         """
         config = config or {}
         
+        # 把 adapter_id 和 platform 加入到 config 中
+        config["adapter_id"] = adapter_id
+        config["platform"] = adapter_type
+        
         if adapter_type == "onebot11":
-            from .onebot11_adapter import OneBot11Adapter
-            adapter = OneBot11Adapter(self.core, adapter_id=adapter_id, **config)
+            from .onebot11 import OneBot11Adapter
+            adapter = OneBot11Adapter(self.core, config=config)
         elif adapter_type == "onebot12":
-            from .onebot12_adapter import OneBot12Adapter
-            adapter = OneBot12Adapter(self.core, adapter_id=adapter_id, **config)
+            from .onebot12 import OneBot12Adapter
+            adapter = OneBot12Adapter(self.core, config=config)
         elif adapter_type == "console":
             from .console_adapter import ConsoleAdapter
-            adapter = ConsoleAdapter(self.core, adapter_id=adapter_id, **config)
+            adapter = ConsoleAdapter(self.core, config=config)
         else:
             raise ValueError(f"不支持的适配器类型: {adapter_type}")
         

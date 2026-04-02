@@ -90,7 +90,7 @@ class ConsoleAdapter(BaseAdapter):
                     sender={"user_id": self.mock_user_id, "nickname": self.mock_nickname, "role": "owner"}
                 )
 
-                await self._publish_event(event)
+                await self._dispatch_event(event)
                 # 给一点微小的延迟，确保插件的 print 输出完毕后再打印下一行的提示符
                 await asyncio.sleep(0.05)
                 print("[输入消息]: ", end="", flush=True)
@@ -107,7 +107,7 @@ class ConsoleAdapter(BaseAdapter):
             await asyncio.sleep(5)
             if self._running:
                 event = HeartbeatEvent(self, {}, 5000)
-                await self._publish_event(event)
+                await self._dispatch_event(event)
 
     async def send_message(self, scene: str, target_id: str, message: Union[str, List[MessageSegment]], **kwargs) -> str:
         if isinstance(message, str):

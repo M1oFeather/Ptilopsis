@@ -61,7 +61,7 @@ class PtilopsisTray:
     def _create_menu(self) -> pystray.Menu:
         """【修改】添加控制面板菜单项"""
         return pystray.Menu(
-            pystray.MenuItem("打开桌面控制面板", self._open_panel_action, default=True),
+            pystray.MenuItem("打开 Web 控制面板", self._open_panel_action, default=True),
             pystray.MenuItem(
                 "显示/隐藏控制台",
                 self._toggle_console_action,

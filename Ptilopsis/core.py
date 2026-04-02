@@ -1,5 +1,6 @@
 # -*- encoding:utf-8 -*-
 import asyncio
+import time
 from typing import Dict, Any
 from .logger import info, error, warning
 
@@ -8,6 +9,7 @@ class Core:
         self.config = config or {}
         self._running = False
         self.loop = None  # 保存主事件循环
+        self.start_time = time.time()  # 记录启动时间
         # 【修改】更新为单数子包路径
         from .event.bus import EventBus
         from .plugin.manager import PluginManager
@@ -18,6 +20,7 @@ class Core:
 
     async def start(self) -> None:
         self._running = True
+        self.start_time = time.time()  # 重新记录启动时间
         self.loop = asyncio.get_running_loop()  # 保存主事件循环
         try:
             await self.plugin_manager.load_all()
